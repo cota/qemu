@@ -18,7 +18,7 @@ import os
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-#sys.path.insert(0, os.path.abspath('.'))
+sys.path.insert(0, os.path.abspath('sphinx'))
 
 # -- General configuration ------------------------------------------------
 
@@ -28,7 +28,7 @@ import os
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = []
+extensions = ['kernel-doc']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -285,3 +285,13 @@ texinfo_documents = [
 
 # If true, do not generate a @detailmenu in the "Top" node's menu.
 #texinfo_no_detailmenu = False
+
+# -- Options for configuring kernel-doc extension  ------------------------
+
+# We use abspath here so that you can run sphinx-build from
+# anywhere and the kernel-doc extension can still find everything.
+# This allows our makefiles to run sphinx-build from the QEMU
+# build directory and external setups like Read The Docs to
+# run it from within the docs directory and still get the same results.
+kerneldoc_bin = os.path.abspath('../scripts/kernel-doc')
+kerneldoc_srctree = os.path.abspath('..')
