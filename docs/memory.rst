@@ -321,3 +321,8 @@ various constraints can be supplied to control how these callbacks are called:
    accesses.
  - .old_mmio eases the porting of code that was formerly using
    cpu_register_io_memory(). It should not be used in new code.
+
+Detailed API documentation
+--------------------------
+
+.. kernel-doc:: include/exec/memory.h
