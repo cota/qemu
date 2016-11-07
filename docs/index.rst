@@ -12,6 +12,7 @@ Contents:
    :maxdepth: 2
 
    bitops
+   memory
 
 Indices and tables
 ==================

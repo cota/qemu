@@ -1,3 +1,4 @@
+==============
 The memory API
 ==============
 
@@ -188,7 +189,7 @@ For example, suppose we have a container A of size 0x8000 with two subregions
 B and C. B is a container mapped at 0x2000, size 0x4000, priority 2; C is
 an MMIO region mapped at 0x0, size 0x6000, priority 1. B currently has two
 of its own subregions: D of size 0x1000 at offset 0 and E of size 0x1000 at
-offset 0x2000. As a diagram:
+offset 0x2000. As a diagram::
 
         0      1000   2000   3000   4000   5000   6000   7000   8000
         |------|------|------|------|------|------|------|------|
@@ -198,8 +199,9 @@ offset 0x2000. As a diagram:
   D:                  [DDDDD]
   E:                                [EEEEE]
 
-The regions that will be seen within this address range then are:
-        [CCCCCCCCCCCC][DDDDD][CCCCC][EEEEE][CCCCC]
+The regions that will be seen within this address range then are::
+
+  [CCCCCCCCCCCC][DDDDD][CCCCC][EEEEE][CCCCC]
 
 Since B has higher priority than C, its subregions appear in the flat map
 even where they overlap with C. In ranges where B has not mapped anything
@@ -207,8 +209,9 @@ C's region appears.
 
 If B had provided its own MMIO operations (ie it was not a pure container)
 then these would be used for any addresses in its range not handled by
-D or E, and the result would be:
-        [CCCCCCCCCCCC][DDDDD][BBBBB][EEEEE][BBBBB]
+D or E, and the result would be::
+
+  [CCCCCCCCCCCC][DDDDD][BBBBB][EEEEE][BBBBB]
 
 Priority values are local to a container, because the priorities of two
 regions are only compared when they are both children of the same container.
@@ -227,6 +230,7 @@ guest accesses an address:
 
 - all direct subregions of the root region are matched against the address, in
   descending priority order
+
   - if the address lies outside the region offset/size, the subregion is
     discarded
   - if the subregion is a leaf (RAM or MMIO), the search terminates, returning
@@ -240,36 +244,39 @@ guest accesses an address:
     address range), then if this is a container with its own MMIO or RAM
     backing the search terminates, returning the container itself. Otherwise
     we continue with the next subregion in priority order
+
 - if none of the subregions match the address then the search terminates
   with no match found
 
 Example memory map
 ------------------
 
-system_memory: container@0-2^48-1
- |
- +---- lomem: alias@0-0xdfffffff ---> #ram (0-0xdfffffff)
- |
- +---- himem: alias@0x100000000-0x11fffffff ---> #ram (0xe0000000-0xffffffff)
- |
- +---- vga-window: alias@0xa0000-0xbffff ---> #pci (0xa0000-0xbffff)
- |      (prio 1)
- |
- +---- pci-hole: alias@0xe0000000-0xffffffff ---> #pci (0xe0000000-0xffffffff)
+::
 
-pci (0-2^32-1)
- |
- +--- vga-area: container@0xa0000-0xbffff
- |      |
- |      +--- alias@0x00000-0x7fff  ---> #vram (0x010000-0x017fff)
- |      |
- |      +--- alias@0x08000-0xffff  ---> #vram (0x020000-0x027fff)
- |
- +---- vram: ram@0xe1000000-0xe1ffffff
- |
- +---- vga-mmio: mmio@0xe2000000-0xe200ffff
+  system_memory: container@0-2^48-1
+   |
+   +---- lomem: alias@0-0xdfffffff ---> #ram (0-0xdfffffff)
+   |
+   +---- himem: alias@0x100000000-0x11fffffff ---> #ram (0xe0000000-0xffffffff)
+   |
+   +---- vga-window: alias@0xa0000-0xbffff ---> #pci (0xa0000-0xbffff)
+   |      (prio 1)
+   |
+   +---- pci-hole: alias@0xe0000000-0xffffffff ---> #pci (0xe0000000-0xffffffff)
 
-ram: ram@0x00000000-0xffffffff
+  pci (0-2^32-1)
+   |
+   +--- vga-area: container@0xa0000-0xbffff
+   |      |
+   |      +--- alias@0x00000-0x7fff  ---> #vram (0x010000-0x017fff)
+   |      |
+   |      +--- alias@0x08000-0xffff  ---> #vram (0x020000-0x027fff)
+   |
+   +---- vram: ram@0xe1000000-0xe1ffffff
+   |
+   +---- vga-mmio: mmio@0xe2000000-0xe200ffff
+
+  ram: ram@0x00000000-0xffffffff
 
 This is a (simplified) PC memory map. The 4GB RAM block is mapped into the
 system address space via two aliases: "lomem" is a 1:1 mapping of the first
@@ -303,8 +310,8 @@ various constraints can be supplied to control how these callbacks are called:
    (in bytes) which the device accepts; accesses outside this range will
    have device and bus specific behaviour (ignored, or machine check)
  - .valid.unaligned specifies that the *device being modelled* supports
-    unaligned accesses; if false, unaligned accesses will invoke the
-    appropriate bus or CPU specific behaviour.
+   unaligned accesses; if false, unaligned accesses will invoke the
+   appropriate bus or CPU specific behaviour.
  - .impl.min_access_size, .impl.max_access_size define the access sizes
    (in bytes) supported by the *implementation*; other access sizes will be
    emulated using the ones available.  For example a 4-byte write will be
