@@ -13,6 +13,7 @@ Contents:
 
    bitops
    memory
+   qht
 
 Indices and tables
 ==================
