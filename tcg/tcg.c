@@ -1138,6 +1138,7 @@ void tcg_dump_ops(TCGContext *s)
             }
             switch (c) {
             case INDEX_op_set_label:
+            case INDEX_op_goto_tb:
             case INDEX_op_br:
             case INDEX_op_brcond_i32:
             case INDEX_op_brcond_i64:
