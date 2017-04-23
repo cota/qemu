@@ -796,6 +796,15 @@ static inline void tcg_gen_exit_tb(uintptr_t val)
  */
 void tcg_gen_goto_tb(unsigned idx);
 
+/**
+ * tcg_gen_goto_ptr() - output a jump to a host address
+ * @ptr: pointer with the target host address
+ *
+ * Implementing this operation is optional. If the TCG backend does not support
+ * it, this call is equivalent to tcg_gen_exit_tb() with 0 as the argument.
+ */
+void tcg_gen_goto_ptr(TCGv_ptr ptr);
+
 #if TARGET_LONG_BITS == 32
 #define tcg_temp_new() tcg_temp_new_i32()
 #define tcg_global_reg_new tcg_global_reg_new_i32

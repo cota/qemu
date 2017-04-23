@@ -477,6 +477,17 @@ current TB was linked to this TB. Otherwise execute the next
 instructions. Only indices 0 and 1 are valid and tcg_gen_goto_tb may be issued
 at most once with each slot index per TB.
 
+* goto_ptr ptr
+
+Jump to a host address given by host pointer 'ptr'.  Typically ptr is obtained
+from the lookup_tb_ptr TCG helper. The return value of this helper depends on
+whether the TB is currently valid: if it is, the corresponding host address
+is returned; if it is not valid, the helper returns the address of the TCG
+epilogue, which restores state to go back to the exec loop.
+
+Implementing goto_ptr is optional for TCG backends. When not implemented,
+calling it is equivalent to calling exit_tb(0).
+
 * qemu_ld_i32/i64 t0, t1, flags, memidx
 * qemu_st_i32/i64 t0, t1, flags, memidx
 
