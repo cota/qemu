@@ -642,6 +642,20 @@ QEMU_BUILD_BUG_ON(OPPARAM_BUF_SIZE > (1 << 14));
 QEMU_BUILD_BUG_ON(sizeof(TCGOp) > 8);
 
 struct TCGContext {
+    /* Read-mostly fields go here to prevent false sharing */
+    struct {
+        GHashTable *helpers;
+
+        void *code_gen_prologue;
+        void *code_gen_buffer;
+        size_t code_gen_buffer_size;
+
+        /* Threshold to flush the translated code buffer.  */
+        void *code_gen_highwater;
+
+        int code_gen_max_blocks;
+    } QEMU_ALIGNED(64);
+
     uint8_t *pool_cur, *pool_end;
     TCGPool *pool_first, *pool_current, *pool_first_large;
     int nb_labels;
@@ -662,8 +676,6 @@ struct TCGContext {
     TCGTemp *frame_temp;
 
     tcg_insn_unit *code_ptr;
-
-    GHashTable *helpers;
 
 #ifdef CONFIG_PROFILER
     /* profiling info */
@@ -697,14 +709,7 @@ struct TCGContext {
        here, because there's too much arithmetic throughout that relies
        on addition and subtraction working on bytes.  Rely on the GCC
        extension that allows arithmetic on void*.  */
-    int code_gen_max_blocks;
-    void *code_gen_prologue;
-    void *code_gen_buffer;
-    size_t code_gen_buffer_size;
     void *code_gen_ptr;
-
-    /* Threshold to flush the translated code buffer.  */
-    void *code_gen_highwater;
 
     TBContext tb_ctx;
 
