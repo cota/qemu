@@ -647,6 +647,7 @@ struct TCGContext {
         GHashTable *helpers;
 
         void *code_gen_prologue;
+        void *code_gen_epilogue;
         void *code_gen_buffer;
         size_t code_gen_buffer_size;
 
