@@ -727,7 +727,7 @@ struct TCGContext {
 
     uint16_t gen_insn_end_off[TCG_MAX_INSNS];
     target_ulong gen_insn_data[TCG_MAX_INSNS][TARGET_INSN_START_WORDS];
-};
+} QEMU_ALIGNED(64);
 
 extern TCGContext tcg_ctx;
 extern bool parallel_cpus;
