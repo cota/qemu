@@ -2153,9 +2153,14 @@ static inline void gen_goto_tb(DisasContext *s, int tb_num, target_ulong eip)
         gen_jmp_im(eip);
         tcg_gen_exit_tb((uintptr_t)s->tb + tb_num);
     } else {
-        /* jump to another page: currently not optimized */
-        gen_jmp_im(eip);
-        gen_eob(s);
+        /* jump to another page */
+        TCGv vaddr = tcg_const_tl(eip);
+        TCGv_ptr ptr = tcg_temp_new_ptr();
+
+        gen_helper_lookup_tb_ptr(ptr, cpu_env, vaddr);
+        tcg_temp_free(vaddr);
+        tcg_gen_goto_ptr(ptr);
+        tcg_temp_free_ptr(ptr);
     }
 }
 
