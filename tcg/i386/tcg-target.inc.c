@@ -1906,6 +1906,14 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
         }
         s->tb_jmp_reset_offset[a0] = tcg_current_code_size(s);
         break;
+    case INDEX_op_goto_ptr:
+        /* save target address into new register */
+        tcg_out_mov(s, TCG_TYPE_PTR, TCG_REG_EDX, a0);
+        /* set return value to 0 */
+        tgen_arithr(s, ARITH_XOR, TCG_REG_EAX, TCG_REG_EAX);
+        /* jmp to the target address (could be epilogue) */
+        tcg_out_modrm(s, OPC_GRP5, EXT5_JMPN_Ev, TCG_REG_EDX);
+        break;
     case INDEX_op_br:
         tcg_out_jxx(s, JCC_JMP, arg_label(a0), 0);
         break;
@@ -2277,6 +2285,7 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
 
 static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
 {
+    static const TCGTargetOpDef ri = { .args_ct_str = { "ri" } };
     static const TCGTargetOpDef ri_r = { .args_ct_str = { "ri", "r" } };
     static const TCGTargetOpDef re_r = { .args_ct_str = { "re", "r" } };
     static const TCGTargetOpDef qi_r = { .args_ct_str = { "qi", "r" } };
@@ -2323,6 +2332,9 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
         return &ri_r;
     case INDEX_op_st_i64:
         return &re_r;
+
+    case INDEX_op_goto_ptr:
+        return &ri;
 
     case INDEX_op_add_i32:
     case INDEX_op_add_i64:
@@ -2569,6 +2581,7 @@ static void tcg_target_qemu_prologue(TCGContext *s)
 
     /* TB epilogue */
     tb_ret_addr = s->code_ptr;
+    s->code_gen_epilogue = s->code_ptr;
 
     tcg_out_addi(s, TCG_REG_CALL_STACK, stack_addend);
 
