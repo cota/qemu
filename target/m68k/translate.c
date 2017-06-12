@@ -190,7 +190,7 @@ static void do_writebacks(DisasContext *s)
     }
 }
 
-#define DISAS_JUMP_NEXT 4
+#define DISAS_JUMP_NEXT (DISAS_TARGET + 0)
 
 #if defined(CONFIG_USER_ONLY)
 #define IS_USER(s) 1

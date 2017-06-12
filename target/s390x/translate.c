@@ -76,7 +76,7 @@ typedef struct {
     } u;
 } DisasCompare;
 
-#define DISAS_EXCP 4
+#define DISAS_EXCP (DISAS_TARGET + 0)
 
 #ifdef DEBUG_INLINE_BRANCHES
 static uint64_t inline_branch_hit[CC_OP_MAX];
