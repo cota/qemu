@@ -6,6 +6,8 @@
 /* internal defines */
 typedef struct DisasContext {
     DisasBase b;
+    target_ulong next_page_start;
+    target_ulong pc_start;
     uint32_t insn;
     /* Nonzero if this instruction has been conditionally skipped.  */
     int condjmp;
