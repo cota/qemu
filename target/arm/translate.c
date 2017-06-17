@@ -11921,6 +11921,27 @@ static void arm_tr_tb_start(DisasBase *db, CPUARMState *env)
     }
 }
 
+static void arm_tr_insn_start(DisasBase *db, CPUARMState *env)
+{
+    DisasContext *dc = container_of(db, DisasContext, b);
+
+    dc->insn_start_idx = tcg_op_buf_count();
+    tcg_gen_insn_start(db->pc,
+                       (dc->condexec_cond << 4) | (dc->condexec_mask >> 1),
+                       0);
+
+#ifdef CONFIG_USER_ONLY
+    /* Intercept jump to the magic kernel page.  */
+    if (db->pc >= 0xffff0000) {
+        /* We always get here via a jump, so know we are not in a
+           conditional execution block.  */
+        gen_exception_internal(EXCP_KERNEL_TRAP);
+        db->is_jmp = DISAS_EXC;
+        return;
+    }
+#endif
+}
+
 /* generate intermediate code for basic block 'tb'.  */
 void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
 {
@@ -11963,22 +11984,11 @@ void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
 
     arm_tr_tb_start(db, env);
     do {
-        dc->insn_start_idx = tcg_op_buf_count();
-        tcg_gen_insn_start(db->pc,
-                           (dc->condexec_cond << 4) | (dc->condexec_mask >> 1),
-                           0);
         db->num_insns++;
-
-#ifdef CONFIG_USER_ONLY
-        /* Intercept jump to the magic kernel page.  */
-        if (db->pc >= 0xffff0000) {
-            /* We always get here via a jump, so know we are not in a
-               conditional execution block.  */
-            gen_exception_internal(EXCP_KERNEL_TRAP);
-            db->is_jmp = DISAS_EXC;
+        arm_tr_insn_start(db, env);
+        if (unlikely(db->is_jmp)) {
             break;
         }
-#endif
 
         if (unlikely(!QTAILQ_EMPTY(&cpu->breakpoints))) {
             CPUBreakpoint *bp;
