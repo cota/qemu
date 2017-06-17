@@ -11942,6 +11942,32 @@ static void arm_tr_insn_start(DisasBase *db, CPUARMState *env)
 #endif
 }
 
+static BreakpointAction
+arm_tr_breakpoint_do(DisasBase *db, CPUARMState *env, const CPUBreakpoint *bp)
+{
+    DisasContext *dc = container_of(db, DisasContext, b);
+
+    if (bp->flags & BP_CPU) {
+        gen_set_condexec(dc);
+        gen_set_pc_im(dc, db->pc);
+        gen_helper_check_breakpoints(cpu_env);
+        /* End the TB early; it's likely not going to be executed */
+        db->is_jmp = DISAS_UPDATE;
+        return BREAKPOINT_CONT_INSN;
+    } else {
+        gen_exception_internal_insn(dc, 0, EXCP_DEBUG);
+        /* The address covered by the breakpoint must be
+           included in [tb->pc, tb->pc + tb->size) in order
+           to for it to be properly cleared -- thus we
+           increment the PC here so that the logic setting
+           tb->size below does the right thing.  */
+        /* TODO: Advance PC by correct instruction length to
+         * avoid disassembler error messages */
+        db->pc += 2;
+        return BREAKPOINT_STOP_TB;
+    }
+}
+
 /* generate intermediate code for basic block 'tb'.  */
 void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
 {
@@ -11994,22 +12020,9 @@ void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
             CPUBreakpoint *bp;
             QTAILQ_FOREACH(bp, &cpu->breakpoints, entry) {
                 if (bp->pc == db->pc) {
-                    if (bp->flags & BP_CPU) {
-                        gen_set_condexec(dc);
-                        gen_set_pc_im(dc, db->pc);
-                        gen_helper_check_breakpoints(cpu_env);
-                        /* End the TB early; it's likely not going to be executed */
-                        db->is_jmp = DISAS_UPDATE;
-                    } else {
-                        gen_exception_internal_insn(dc, 0, EXCP_DEBUG);
-                        /* The address covered by the breakpoint must be
-                           included in [tb->pc, tb->pc + tb->size) in order
-                           to for it to be properly cleared -- thus we
-                           increment the PC here so that the logic setting
-                           tb->size below does the right thing.  */
-                        /* TODO: Advance PC by correct instruction length to
-                         * avoid disassembler error messages */
-                        db->pc += 2;
+                    BreakpointAction ba = arm_tr_breakpoint_do(db, env, bp);
+
+                    if (ba == BREAKPOINT_STOP_TB) {
                         goto done_generating;
                     }
                     break;
