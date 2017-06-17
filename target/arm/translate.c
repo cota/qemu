@@ -11810,6 +11810,18 @@ static bool insn_crosses_page(CPUARMState *env, DisasContext *s)
     return false;
 }
 
+static void arm_tr_init_globals(DisasBase *db, CPUARMState *env)
+{
+    cpu_F0s = tcg_temp_new_i32();
+    cpu_F1s = tcg_temp_new_i32();
+    cpu_F0d = tcg_temp_new_i64();
+    cpu_F1d = tcg_temp_new_i64();
+    cpu_V0 = cpu_F0d;
+    cpu_V1 = cpu_F1d;
+    /* FIXME: cpu_M0 can probably be the same as cpu_V0.  */
+    cpu_M0 = tcg_temp_new_i64();
+}
+
 /* generate intermediate code for basic block 'tb'.  */
 void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
 {
@@ -11886,16 +11898,10 @@ void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
     dc->pstate_ss = ARM_TBFLAG_PSTATE_SS(tb->flags);
     dc->is_ldex = false;
     dc->ss_same_el = false; /* Can't be true since EL_d must be AArch64 */
-
-    cpu_F0s = tcg_temp_new_i32();
-    cpu_F1s = tcg_temp_new_i32();
-    cpu_F0d = tcg_temp_new_i64();
-    cpu_F1d = tcg_temp_new_i64();
-    cpu_V0 = cpu_F0d;
-    cpu_V1 = cpu_F1d;
-    /* FIXME: cpu_M0 can probably be the same as cpu_V0.  */
-    cpu_M0 = tcg_temp_new_i64();
     next_page_start = (pc_start & TARGET_PAGE_MASK) + TARGET_PAGE_SIZE;
+
+    arm_tr_init_globals(db, env);
+
     db->num_insns = 0;
     max_insns = tb->cflags & CF_COUNT_MASK;
     if (max_insns == 0) {
