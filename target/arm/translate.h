@@ -144,6 +144,7 @@ static void disas_set_insn_syndrome(DisasContext *s, uint32_t syn)
  * as opposed to attempting to use lookup_and_goto_ptr.
  */
 #define DISAS_EXIT (DISAS_TARGET + 8)
+#define DISAS_DONE_GENERATING (DISAS_TARGET + 9)
 
 #ifdef TARGET_AARCH64
 void a64_translate_init(void);
