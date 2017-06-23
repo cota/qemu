@@ -317,10 +317,15 @@ static inline void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *cpu,
 
 /*
  * Translation Cache-related fields of a TB.
+ * This struct exists just for convenience; we keep track of TB's in a binary
+ * search tree, and the only fields needed to compare TB's in the tree are
+ * @ptr and @size. @search is brought here for consistency, since it is also
+ * a TC-related field.
  */
 struct tb_tc {
     void *ptr;    /* pointer to the translated code */
     uint8_t *search;  /* pointer to search data */
+    unsigned int size;
 };
 
 struct TranslationBlock {
