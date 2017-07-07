@@ -59,6 +59,7 @@
 
 #include "elf.h"
 #include "exec/log.h"
+#include "sysemu/sysemu.h"
 
 /* Forward declarations for functions declared in tcg-target.inc.c and
    used here. */
@@ -325,13 +326,14 @@ static inline bool tcg_region_initial_alloc__locked(TCGContext *s)
 /* Call from a safe-work context */
 void tcg_region_reset_all(void)
 {
+    unsigned int n_ctxs = atomic_read(&n_tcg_ctxs);
     unsigned int i;
 
     qemu_mutex_lock(&region.lock);
     region.current = 0;
     region.n_full = 0;
 
-    for (i = 0; i < n_tcg_ctxs; i++) {
+    for (i = 0; i < n_ctxs; i++) {
         if (unlikely(tcg_region_initial_alloc__locked(tcg_ctxs[i]))) {
             tcg_abort();
         }
@@ -365,6 +367,23 @@ static void tcg_region_set_guard_pages(void)
  * Region partitioning works by splitting code_gen_buffer into separate regions,
  * and then assigning regions to TCG threads so that the threads can translate
  * code in parallel without synchronization.
+ *
+ * In softmmu the number of TCG threads is bounded by smp_cpus, so
+ * tcg_region_init callers must ensure that @n_regions is set so that there will
+ * be at least as many regions as TCG threads.
+ *
+ * User-mode callers must set @n_regions to 0/1, thereby using a single region.
+ * Having multiple regions in user-mode is not supported, since the number of
+ * vCPU threads (recall that each thread spawned by the guest corresponds to
+ * a vCPU thread) is only bounded by the OS, and usually this number is huge
+ * (tens of thousands is not uncommon).  Thus, given this large bound on the
+ * number of vCPU threads and the fact that code_gen_buffer is allocated at
+ * compile-time, we cannot guarantee that the availability of at least one
+ * region per vCPU thread.
+ *
+ * However, this user-mode limitation is unlikely to be a significant problem
+ * in practice. Multi-threaded guests share most if not all of their translated
+ * code, which makes parallel code generation less appealing than in softmmu.
  */
 void tcg_region_init(size_t n_regions)
 {
@@ -398,13 +417,69 @@ void tcg_region_init(size_t n_regions)
     region.buf = buf;
     tcg_region_set_guard_pages();
     qemu_mutex_init(&region.lock);
-    /*
-     * We do not yet support multiple TCG contexts, so do the initial
-     * allocation now.
-     */
+#ifdef CONFIG_USER_ONLY
+    /* In user-mode we support only one ctx, so do the initial allocation now */
     if (unlikely(tcg_region_initial_alloc__locked(tcg_ctx))) {
         tcg_abort();
     }
+#endif
+}
+
+/*
+ * All TCG threads except the parent (i.e. the one that called tcg_context_init
+ * and registered the target's TCG globals) must register with this function
+ * before initiating translation.
+ *
+ * In user-mode we just point tcg_ctx to tcg_init_ctx. See the documentation
+ * of tcg_region_init() for the reasoning behind this.
+ *
+ * In softmmu each caller registers its context in tcg_ctxs[]. Note that in
+ * softmmu tcg_ctxs[] does not track tcg_ctx_init, since the initial context
+ * is not used anymore for translation once this function is called.
+ *
+ * Not tracking tcg_init_ctx in tcg_ctxs[] in softmmu keeps code that iterates
+ * over the array (e.g. tcg_code_size() the same for both softmmu and user-mode.
+ */
+void tcg_register_thread(void)
+{
+#ifdef CONFIG_USER_ONLY
+    tcg_ctx = &tcg_init_ctx;
+#else
+    TCGContext *s = g_malloc(sizeof(*s));
+    int i;
+
+    memcpy(s, &tcg_init_ctx, sizeof(*s));
+
+    /* claim the first free pointer in tcg_ctxs and increment n_tcg_ctxs */
+    for (i = 0; i < smp_cpus; i++) {
+        if (atomic_cmpxchg(&tcg_ctxs[i], NULL, s) == NULL) {
+            unsigned int n;
+
+            n = atomic_fetch_inc(&n_tcg_ctxs);
+            /*
+             * Zero out s->prof in all contexts but the first.
+             * This ensures that we correctly account for the profiling info
+             * generated during initialization, since tcg_init_ctx is not
+             * tracked by the array.
+             */
+            if (n != 0) {
+#ifdef CONFIG_PROFILER
+                memset(&s->prof, 0, sizeof(s->prof));
+#endif
+            }
+            break;
+        }
+    }
+    /* Only vCPU threads can call this function */
+    g_assert(i < smp_cpus);
+
+    tcg_ctx = s;
+    qemu_mutex_lock(&region.lock);
+    if (unlikely(tcg_region_initial_alloc__locked(tcg_ctx))) {
+        tcg_abort();
+    }
+    qemu_mutex_unlock(&region.lock);
+#endif
 }
 
 /*
@@ -416,12 +491,13 @@ void tcg_region_init(size_t n_regions)
  */
 size_t tcg_code_size(void)
 {
+    unsigned int n_ctxs = atomic_read(&n_tcg_ctxs);
     unsigned int i;
     size_t total;
 
     qemu_mutex_lock(&region.lock);
     total = region.n_full * (region.size - TCG_HIGHWATER);
-    for (i = 0; i < n_tcg_ctxs; i++) {
+    for (i = 0; i < n_ctxs; i++) {
         const TCGContext *s = tcg_ctxs[i];
         size_t size;
 
@@ -516,11 +592,21 @@ static GHashTable *helper_table;
 static int indirect_reg_alloc_order[ARRAY_SIZE(tcg_target_reg_alloc_order)];
 static void process_op_defs(TCGContext *s);
 
+/*
+ * In user-mode we simply share the init context among threads, since we
+ * use a single region. See the documentation tcg_region_init() for the
+ * reasoning behind this.
+ * In softmmu we will have at most smp_cpus TCG threads.
+ */
 static void tcg_ctxs_init(TCGContext *s)
 {
+#ifdef CONFIG_USER_ONLY
     tcg_ctxs = g_new(TCGContext *, 1);
     tcg_ctxs[0] = s;
     n_tcg_ctxs = 1;
+#else
+    tcg_ctxs = g_new0(TCGContext *, smp_cpus);
+#endif
 }
 
 void tcg_context_init(TCGContext *s)
@@ -2734,9 +2820,10 @@ static void tcg_reg_alloc_call(TCGContext *s, int nb_oargs, int nb_iargs,
 static inline
 void tcg_profile_snapshot(TCGProfile *prof, bool counters, bool table)
 {
+    unsigned int n_ctxs = atomic_read(&n_tcg_ctxs);
     unsigned int i;
 
-    for (i = 0; i < n_tcg_ctxs; i++) {
+    for (i = 0; i < n_ctxs; i++) {
         const TCGProfile *orig = &tcg_ctxs[i]->prof;
 
         if (counters) {
