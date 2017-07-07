@@ -49,6 +49,9 @@ void gen_intermediate_code(CPUArchState *env, struct TranslationBlock *tb);
 void restore_state_to_opc(CPUArchState *env, struct TranslationBlock *tb,
                           target_ulong *data);
 
+#ifdef CONFIG_SOFTMMU
+void softmmu_tcg_region_init(void);
+#endif
 void cpu_gen_init(void);
 bool cpu_restore_state(CPUState *cpu, uintptr_t searched_pc);
 
