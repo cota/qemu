@@ -59,6 +59,7 @@
 #include "qemu/main-loop.h"
 #include "exec/log.h"
 #include "sysemu/cpus.h"
+#include "sysemu/sysemu.h"
 
 /* #define DEBUG_TB_INVALIDATE */
 /* #define DEBUG_TB_FLUSH */
@@ -797,6 +798,39 @@ static inline void code_gen_alloc(size_t tb_size)
     qemu_mutex_init(&tb_ctx.tb_lock);
 }
 
+#ifdef CONFIG_SOFTMMU
+/*
+ * It is likely that some vCPUs will translate more code than others, so we
+ * first try to set more regions than smp_cpus, with those regions being
+ * larger than the minimum code_gen_buffer size. If that's not possible we
+ * make do by evenly dividing the code_gen_buffer among the vCPUs.
+ */
+void softmmu_tcg_region_init(void)
+{
+    size_t i;
+
+    /* Use a single region if all we have is one vCPU thread */
+    if (smp_cpus == 1 || !qemu_tcg_mttcg_enabled()) {
+        tcg_region_init(0);
+        return;
+    }
+
+    for (i = 8; i > 0; i--) {
+        size_t regions_per_thread = i;
+        size_t region_size;
+
+        region_size = tcg_init_ctx.code_gen_buffer_size;
+        region_size /= smp_cpus * regions_per_thread;
+
+        if (region_size >= 2 * MIN_CODE_GEN_BUFFER_SIZE) {
+            tcg_region_init(smp_cpus * regions_per_thread);
+            return;
+        }
+    }
+    tcg_region_init(smp_cpus);
+}
+#endif
+
 static void tb_htable_init(void)
 {
     unsigned int mode = QHT_MODE_AUTO_RESIZE;
@@ -916,13 +950,8 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
         size_t host_size = 0;
 
         g_tree_foreach(tb_ctx.tb_tree, tb_host_size_iter, &host_size);
-        printf("qemu: flush code_size=%td nb_tbs=%zu avg_tb_size=%zu\n",
-               tcg_ctx->code_gen_ptr - tcg_ctx->code_gen_buffer, nb_tbs,
-               nb_tbs > 0 ? host_size / nb_tbs : 0);
-    }
-    if ((unsigned long)(tcg_ctx->code_gen_ptr - tcg_ctx->code_gen_buffer)
-        > tcg_ctx->code_gen_buffer_size) {
-        cpu_abort(cpu, "Internal error: code buffer overflow\n");
+        printf("qemu: flush code_size=%zu nb_tbs=%zu avg_tb_size=%zu\n",
+               tcg_code_size(), nb_tbs, nb_tbs > 0 ? host_size / nb_tbs : 0);
     }
 
     CPU_FOREACH(cpu) {
@@ -936,7 +965,7 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
     page_flush_tb();
 
-    tcg_ctx->code_gen_ptr = tcg_ctx->code_gen_buffer;
+    tcg_region_reset_all();
     /* XXX: flush processor icache at this point if cache flush is
        expensive */
     atomic_mb_set(&tb_ctx.tb_flush_count, tb_ctx.tb_flush_count + 1);
@@ -1281,9 +1310,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         cflags |= CF_USE_ICOUNT;
     }
 
+ buffer_overflow:
     tb = tb_alloc(pc);
     if (unlikely(!tb)) {
- buffer_overflow:
         /* flush must be done */
         tb_flush(cpu);
         mmap_unlock();
@@ -1366,9 +1395,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     }
 #endif
 
-    tcg_ctx->code_gen_ptr = (void *)
+    atomic_set(&tcg_ctx->code_gen_ptr, (void *)
         ROUND_UP((uintptr_t)gen_code_buf + gen_code_size + search_size,
-                 CODE_GEN_ALIGN);
+                 CODE_GEN_ALIGN));
 
     /* init jump list */
     assert(((uintptr_t)tb & 3) == 0);
@@ -1920,9 +1949,8 @@ void dump_exec_info(FILE *f, fprintf_function cpu_fprintf)
      * otherwise users might think "-tb-size" is not honoured.
      * For avg host size we use the precise numbers from tb_tree_stats though.
      */
-    cpu_fprintf(f, "gen code size       %td/%zd\n",
-                tcg_ctx->code_gen_ptr - tcg_ctx->code_gen_buffer,
-                tcg_ctx->code_gen_highwater - tcg_ctx->code_gen_buffer);
+    cpu_fprintf(f, "gen code size       %zu/%zu\n",
+                tcg_code_size(), tcg_code_capacity());
     cpu_fprintf(f, "TB count            %zu\n", nb_tbs);
     cpu_fprintf(f, "TB avg target size  %zu max=%zu bytes\n",
                 nb_tbs ? tst.target_size / nb_tbs : 0,
