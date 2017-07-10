@@ -292,8 +292,7 @@ static bool tb_cmp(const void *p, const void *d)
         tb->page_addr[0] == desc->phys_page1 &&
         tb->cs_base == desc->cs_base &&
         tb->flags == desc->flags &&
-        tb->trace_vcpu_dstate == desc->trace_vcpu_dstate &&
-        !atomic_read(&tb->invalid)) {
+        tb->trace_vcpu_dstate == desc->trace_vcpu_dstate) {
         /* check next page if needed */
         if (tb->page_addr[1] == -1) {
             return true;
