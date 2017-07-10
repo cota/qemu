@@ -1073,12 +1073,16 @@ void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr)
 
     assert_tb_locked();
 
-    atomic_set(&tb->invalid, true);
-
     /* remove the TB from the hash list */
     phys_pc = tb->page_addr[0] + (tb->pc & ~TARGET_PAGE_MASK);
     h = tb_hash_func(phys_pc, tb->pc, tb->flags, tb->trace_vcpu_dstate);
     qht_remove(&tcg_ctx.tb_ctx.htable, tb, h);
+
+    /*
+     * Mark the TB as invalid *after* it's been removed from tb_hash, which
+     * eliminates the need to check this bit on lookups.
+     */
+    tb->invalid = true;
 
     /* remove the TB from the page list */
     if (tb->page_addr[0] != page_addr) {
