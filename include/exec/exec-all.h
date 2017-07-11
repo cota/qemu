@@ -375,6 +375,8 @@ void tb_flush(CPUState *cpu);
 void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr);
 TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
                                    target_ulong cs_base, uint32_t flags);
+TranslationBlock *tb_lookup__cpu_state(CPUState *cpu, target_ulong *pc,
+                                       target_ulong *cs_base, uint32_t *flags);
 
 #if defined(USE_DIRECT_JUMP)
 
