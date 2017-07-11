@@ -21,7 +21,7 @@
 /* Might cause an exception, so have a longjmp destination ready */
 static inline TranslationBlock *
 tb_lookup__cpu_state(CPUState *cpu, target_ulong *pc, target_ulong *cs_base,
-                     uint32_t *flags)
+                     uint32_t *flags, uint32_t cf_mask)
 {
     CPUArchState *env = (CPUArchState *)cpu->env_ptr;
     TranslationBlock *tb;
@@ -34,10 +34,11 @@ tb_lookup__cpu_state(CPUState *cpu, target_ulong *pc, target_ulong *cs_base,
                tb->pc == *pc &&
                tb->cs_base == *cs_base &&
                tb->flags == *flags &&
+               mask_cf(tb->cflags) == cf_mask &&
                tb->trace_vcpu_dstate == *cpu->trace_dstate)) {
         return tb;
     }
-    tb = tb_htable_lookup(cpu, *pc, *cs_base, *flags);
+    tb = tb_htable_lookup(cpu, *pc, *cs_base, *flags, cf_mask);
     if (tb == NULL) {
         return NULL;
     }

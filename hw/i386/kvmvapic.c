@@ -458,10 +458,15 @@ static void patch_instruction(VAPICROMState *s, X86CPU *cpu, target_ulong ip)
     resume_all_vcpus();
 
     if (tcg_enabled()) {
+        uint32_t cflags = 1;
+
+        if (parallel_cpus) {
+            cflags |= CF_PARALLEL;
+        }
         /* Both tb_lock and iothread_mutex will be reset when
          *  longjmps back into the cpu_exec loop. */
         tb_lock();
-        tb_gen_code(cs, current_pc, current_cs_base, current_flags, 1);
+        tb_gen_code(cs, current_pc, current_cs_base, current_flags, cflags);
         cpu_loop_exit_noexc(cs);
     }
 }

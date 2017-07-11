@@ -1075,7 +1075,8 @@ void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr)
 
     /* remove the TB from the hash list */
     phys_pc = tb->page_addr[0] + (tb->pc & ~TARGET_PAGE_MASK);
-    h = tb_hash_func(phys_pc, tb->pc, tb->flags, tb->trace_vcpu_dstate);
+    h = tb_hash_func(phys_pc, tb->pc, tb->flags, mask_cf(tb->cflags),
+                     tb->trace_vcpu_dstate);
     qht_remove(&tcg_ctx.tb_ctx.htable, tb, h);
 
     /*
@@ -1226,7 +1227,8 @@ static void tb_link_page(TranslationBlock *tb, tb_page_addr_t phys_pc,
     }
 
     /* add in the hash table */
-    h = tb_hash_func(phys_pc, tb->pc, tb->flags, tb->trace_vcpu_dstate);
+    h = tb_hash_func(phys_pc, tb->pc, tb->flags, mask_cf(tb->cflags),
+                     tb->trace_vcpu_dstate);
     qht_insert(&tcg_ctx.tb_ctx.htable, tb, h);
 
 #ifdef DEBUG_TB_CHECK
@@ -1504,10 +1506,15 @@ void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
 #endif
 #ifdef TARGET_HAS_PRECISE_SMC
     if (current_tb_modified) {
+        uint32_t cflags = 1;
+
+        if (parallel_cpus) {
+            cflags |= CF_PARALLEL;
+        }
         /* we generate a block containing just the instruction
            modifying the memory. It will ensure that it cannot modify
            itself */
-        tb_gen_code(cpu, current_pc, current_cs_base, current_flags, 1);
+        tb_gen_code(cpu, current_pc, current_cs_base, current_flags, cflags);
         cpu_loop_exit_noexc(cpu);
     }
 #endif
@@ -1622,10 +1629,15 @@ static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
     p->first_tb = NULL;
 #ifdef TARGET_HAS_PRECISE_SMC
     if (current_tb_modified) {
+        uint32_t cflags = 1;
+
+        if (parallel_cpus) {
+            cflags |= CF_PARALLEL;
+        }
         /* we generate a block containing just the instruction
            modifying the memory. It will ensure that it cannot modify
            itself */
-        tb_gen_code(cpu, current_pc, current_cs_base, current_flags, 1);
+        tb_gen_code(cpu, current_pc, current_cs_base, current_flags, cflags);
         /* tb_lock will be reset after cpu_loop_exit_noexc longjmps
          * back into the cpu_exec loop. */
         return true;
@@ -1769,6 +1781,9 @@ void cpu_io_recompile(CPUState *cpu, uintptr_t retaddr)
     }
 
     cflags = n | CF_LAST_IO;
+    if (parallel_cpus) {
+        cflags |= CF_PARALLEL;
+    }
     pc = tb->pc;
     cs_base = tb->cs_base;
     flags = tb->flags;
