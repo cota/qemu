@@ -510,9 +510,9 @@ void *qht_lookup(struct qht *ht, const void *userp, uint32_t hash)
 }
 
 /* call with head->lock held */
-static bool qht_insert__locked(struct qht *ht, struct qht_map *map,
-                               struct qht_bucket *head, void *p, uint32_t hash,
-                               bool *needs_resize)
+static void *qht_insert__locked(struct qht *ht, struct qht_map *map,
+                                struct qht_bucket *head, void *p, uint32_t hash,
+                                bool *needs_resize, void **existing)
 {
     struct qht_bucket *b = head;
     struct qht_bucket *prev = NULL;
@@ -522,7 +522,11 @@ static bool qht_insert__locked(struct qht *ht, struct qht_map *map,
     do {
         for (i = 0; i < QHT_BUCKET_ENTRIES; i++) {
             if (b->pointers[i]) {
-                if (unlikely(b->pointers[i] == p)) {
+                if (unlikely(b->hashes[i] == hash &&
+                             ht->cmp(b->pointers[i], p))) {
+                    if (existing) {
+                        *existing = b->pointers[i];
+                    }
                     return false;
                 }
             } else {
@@ -552,7 +556,7 @@ static bool qht_insert__locked(struct qht *ht, struct qht_map *map,
     atomic_set(&b->hashes[i], hash);
     atomic_set(&b->pointers[i], p);
     seqlock_write_end(&head->sequence);
-    return true;
+    return p;
 }
 
 static __attribute__((noinline)) void qht_grow_maybe(struct qht *ht)
@@ -576,7 +580,7 @@ static __attribute__((noinline)) void qht_grow_maybe(struct qht *ht)
     qemu_mutex_unlock(&ht->lock);
 }
 
-bool qht_insert(struct qht *ht, void *p, uint32_t hash)
+bool qht_insert(struct qht *ht, void *p, uint32_t hash, void **existing)
 {
     struct qht_bucket *b;
     struct qht_map *map;
@@ -587,7 +591,7 @@ bool qht_insert(struct qht *ht, void *p, uint32_t hash)
     qht_debug_assert(p);
 
     b = qht_bucket_lock__no_stale(ht, hash, &map);
-    ret = qht_insert__locked(ht, map, b, p, hash, &needs_resize);
+    ret = qht_insert__locked(ht, map, b, p, hash, &needs_resize, existing);
     qht_bucket_debug__locked(b);
     qemu_spin_unlock(&b->lock);
 
@@ -743,7 +747,7 @@ static void qht_map_copy(struct qht *ht, void *p, uint32_t hash, void *userp)
     struct qht_bucket *b = qht_map_to_bucket(new, hash);
 
     /* no need to acquire b->lock because no thread has seen this map yet */
-    qht_insert__locked(ht, new, b, p, hash, NULL);
+    qht_insert__locked(ht, new, b, p, hash, NULL, NULL);
 }
 
 /*
