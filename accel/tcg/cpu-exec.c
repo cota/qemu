@@ -224,31 +224,27 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
 static void cpu_exec_step(CPUState *cpu)
 {
     CPUClass *cc = CPU_GET_CLASS(cpu);
-    CPUArchState *env = (CPUArchState *)cpu->env_ptr;
     TranslationBlock *tb;
     target_ulong cs_base, pc;
     uint32_t flags;
 
-    cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
     if (sigsetjmp(cpu->jmp_env, 0) == 0) {
-        mmap_lock();
-        tb_lock();
-        tb = tb_gen_code(cpu, pc, cs_base, flags,
-                         1 | CF_NOCACHE | CF_IGNORE_ICOUNT);
-        tb->orig_tb = NULL;
-        tb_unlock();
-        mmap_unlock();
+        tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags);
+        if (tb == NULL) {
+            mmap_lock();
+            tb_lock();
+            tb = tb_gen_code(cpu, pc, cs_base, flags,
+                             1 | CF_IGNORE_ICOUNT);
+            tb->orig_tb = NULL;
+            tb_unlock();
+            mmap_unlock();
+        }
 
         cc->cpu_exec_enter(cpu);
         /* execute the generated code */
-        trace_exec_tb_nocache(tb, pc);
+        trace_exec_tb(tb, pc);
         cpu_tb_exec(cpu, tb);
         cc->cpu_exec_exit(cpu);
-
-        tb_lock();
-        tb_phys_invalidate(tb, -1);
-        tb_free(tb);
-        tb_unlock();
     } else {
         /* We may have exited due to another problem here, so we need
          * to reset any tb_locks we may have taken but didn't release.
@@ -280,6 +276,7 @@ struct tb_desc {
     CPUArchState *env;
     tb_page_addr_t phys_page1;
     uint32_t flags;
+    uint32_t cf_mask;
     uint32_t trace_vcpu_dstate;
 };
 
@@ -292,6 +289,7 @@ static bool tb_cmp(const void *p, const void *d)
         tb->page_addr[0] == desc->phys_page1 &&
         tb->cs_base == desc->cs_base &&
         tb->flags == desc->flags &&
+        tb_cf_mask(tb) == desc->cf_mask &&
         tb->trace_vcpu_dstate == desc->trace_vcpu_dstate) {
         /* check next page if needed */
         if (tb->page_addr[1] == -1) {
@@ -320,11 +318,12 @@ static TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
     desc.env = (CPUArchState *)cpu->env_ptr;
     desc.cs_base = cs_base;
     desc.flags = flags;
+    desc.cf_mask = curr_cf_mask();
     desc.trace_vcpu_dstate = *cpu->trace_dstate;
     desc.pc = pc;
     phys_pc = get_page_addr_code(desc.env, pc);
     desc.phys_page1 = phys_pc & TARGET_PAGE_MASK;
-    h = tb_hash_func(phys_pc, pc, flags, *cpu->trace_dstate);
+    h = tb_hash_func(phys_pc, pc, flags, curr_cf_mask(), *cpu->trace_dstate);
     return qht_lookup(&tcg_ctx.tb_ctx.htable, tb_cmp, &desc, h);
 }
 
@@ -345,6 +344,7 @@ TranslationBlock *tb_lookup__cpu_state(CPUState *cpu, target_ulong *pc,
                tb->pc == *pc &&
                tb->cs_base == *cs_base &&
                tb->flags == *flags &&
+               tb_cf_mask(tb) == curr_cf_mask() &&
                tb->trace_vcpu_dstate == *cpu->trace_dstate)) {
         return tb;
     }

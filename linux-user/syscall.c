@@ -6312,11 +6312,10 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         sigprocmask(SIG_BLOCK, &sigmask, &info.sigmask);
 
         /* If this is our first additional thread, we need to ensure we
-         * generate code for parallel execution and flush old translations.
+         * generate code for parallel execution.
          */
         if (!parallel_cpus) {
             parallel_cpus = true;
-            tb_flush(cpu);
         }
 
         ret = pthread_create(&info.thread, &attr, clone_func, &info);
