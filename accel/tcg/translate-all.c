@@ -1082,7 +1082,7 @@ void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr)
      * Mark the TB as invalid *after* it's been removed from tb_hash, which
      * eliminates the need to check this bit on lookups.
      */
-    tb->invalid = true;
+    tb->cflags |= CF_INVALID;
 
     /* remove the TB from the page list */
     if (tb->page_addr[0] != page_addr) {
@@ -1273,7 +1273,6 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->flags = flags;
     tb->cflags = cflags;
     tb->trace_vcpu_dstate = *cpu->trace_dstate;
-    tb->invalid = false;
 
 #ifdef CONFIG_PROFILER
     tcg_ctx.tb_count1++; /* includes aborted translations because of
