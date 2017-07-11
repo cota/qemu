@@ -327,6 +327,7 @@ struct TranslationBlock {
 #define CF_USE_ICOUNT  0x20000
 #define CF_IGNORE_ICOUNT 0x40000 /* Do not generate icount code */
 #define CF_INVALID     0x80000 /* Protected by tb_lock */
+#define CF_PARALLEL    0x100000 /* Generate code for a parallel context */
 
     /* Per-vCPU dynamic tracing state used to generate this TB */
     uint32_t trace_vcpu_dstate;
@@ -370,11 +371,34 @@ struct TranslationBlock {
     uintptr_t jmp_list_first;
 };
 
+extern bool parallel_cpus;
+
+/* mask cflags for hashing/comparison */
+static inline uint32_t mask_cf(uint32_t cflags)
+{
+    uint32_t mask = 0;
+
+    mask |= CF_PARALLEL;
+    return cflags & mask;
+}
+
+/* current cflags, masked for hashing/comparison */
+static inline uint32_t curr_cf_mask(void)
+{
+    uint32_t val = 0;
+
+    if (parallel_cpus) {
+        val |= CF_PARALLEL;
+    }
+    return val;
+}
+
 void tb_free(TranslationBlock *tb);
 void tb_flush(CPUState *cpu);
 void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr);
 TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
-                                   target_ulong cs_base, uint32_t flags);
+                                   target_ulong cs_base, uint32_t flags,
+                                   uint32_t cf_mask);
 
 #if defined(USE_DIRECT_JUMP)
 

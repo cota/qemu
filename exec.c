@@ -2414,8 +2414,13 @@ static void check_watchpoint(int offset, int len, MemTxAttrs attrs, int flags)
                     cpu->exception_index = EXCP_DEBUG;
                     cpu_loop_exit(cpu);
                 } else {
+                    uint32_t cflags = 1;
+
+                    if (parallel_cpus) {
+                        cflags |= CF_PARALLEL;
+                    }
                     cpu_get_tb_cpu_state(env, &pc, &cs_base, &cpu_flags);
-                    tb_gen_code(cpu, pc, cs_base, cpu_flags, 1);
+                    tb_gen_code(cpu, pc, cs_base, cpu_flags, cflags);
                     cpu_loop_exit_noexc(cpu);
                 }
             }
