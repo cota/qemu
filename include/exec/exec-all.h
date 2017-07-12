@@ -408,7 +408,7 @@ static inline uint32_t curr_cf_mask(void)
     return val;
 }
 
-void tb_free(TranslationBlock *tb);
+void tb_remove(TranslationBlock *tb);
 void tb_flush(CPUState *cpu);
 void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr);
 TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
