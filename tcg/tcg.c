@@ -115,6 +115,8 @@ static int tcg_target_const_match(tcg_target_long val, TCGType type,
 static void tcg_out_tb_init(TCGContext *s);
 static bool tcg_out_tb_finalize(TCGContext *s);
 
+static TCGContext **tcg_ctxs;
+static unsigned int n_tcg_ctxs;
 
 static TCGRegSet tcg_target_available_regs[2];
 static TCGRegSet tcg_target_call_clobber_regs;
@@ -323,6 +325,13 @@ static GHashTable *helper_table;
 static int indirect_reg_alloc_order[ARRAY_SIZE(tcg_target_reg_alloc_order)];
 static void process_op_defs(TCGContext *s);
 
+static void tcg_ctxs_init(TCGContext *s)
+{
+    tcg_ctxs = g_new(TCGContext *, 1);
+    tcg_ctxs[0] = s;
+    n_tcg_ctxs = 1;
+}
+
 void tcg_context_init(TCGContext *s)
 {
     int op, total_args, n, i;
@@ -381,6 +390,7 @@ void tcg_context_init(TCGContext *s)
         indirect_reg_alloc_order[i] = tcg_target_reg_alloc_order[i];
     }
 
+    tcg_ctxs_init(s);
     tcg_ctx = s;
 }
 
