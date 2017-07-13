@@ -641,6 +641,14 @@ QEMU_BUILD_BUG_ON(OPPARAM_BUF_SIZE > (1 << 14));
 /* Make sure that we don't overflow 64 bits without noticing.  */
 QEMU_BUILD_BUG_ON(sizeof(TCGOp) > 8);
 
+struct tcg_temp_info {
+    bool is_const;
+    uint16_t prev_copy;
+    uint16_t next_copy;
+    tcg_target_ulong val;
+    tcg_target_ulong mask;
+};
+
 struct TCGContext {
     uint8_t *pool_cur, *pool_end;
     TCGPool *pool_first, *pool_current, *pool_first_large;
@@ -715,6 +723,10 @@ struct TCGContext {
 
     TCGTempSet free_temps[TCG_TYPE_COUNT * 2];
     TCGTemp temps[TCG_MAX_TEMPS]; /* globals first, temps after */
+
+    /* optimizer */
+    struct tcg_temp_info opt_temps[TCG_MAX_TEMPS];
+    TCGTempSet opt_temps_used;
 
     /* Tells which temporary holds a given register.
        It does not take into account fixed registers */
