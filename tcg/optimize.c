@@ -32,30 +32,21 @@
         glue(glue(case INDEX_op_, x), _i32):    \
         glue(glue(case INDEX_op_, x), _i64)
 
-struct tcg_temp_info {
-    bool is_const;
-    uint16_t prev_copy;
-    uint16_t next_copy;
-    tcg_target_ulong val;
-    tcg_target_ulong mask;
-};
-
-static struct tcg_temp_info temps[TCG_MAX_TEMPS];
-static TCGTempSet temps_used;
-
 static inline bool temp_is_const(TCGArg arg)
 {
-    return temps[arg].is_const;
+    return tcg_ctx->opt_temps[arg].is_const;
 }
 
 static inline bool temp_is_copy(TCGArg arg)
 {
-    return temps[arg].next_copy != arg;
+    return tcg_ctx->opt_temps[arg].next_copy != arg;
 }
 
 /* Reset TEMP's state, possibly removing the temp for the list of copies.  */
 static void reset_temp(TCGArg temp)
 {
+    struct tcg_temp_info *temps = tcg_ctx->opt_temps;
+
     temps[temps[temp].next_copy].prev_copy = temps[temp].prev_copy;
     temps[temps[temp].prev_copy].next_copy = temps[temp].next_copy;
     temps[temp].next_copy = temp;
@@ -67,18 +58,20 @@ static void reset_temp(TCGArg temp)
 /* Reset all temporaries, given that there are NB_TEMPS of them.  */
 static void reset_all_temps(int nb_temps)
 {
-    bitmap_zero(temps_used.l, nb_temps);
+    bitmap_zero(tcg_ctx->opt_temps_used.l, nb_temps);
 }
 
 /* Initialize and activate a temporary.  */
 static void init_temp_info(TCGArg temp)
 {
-    if (!test_bit(temp, temps_used.l)) {
+    struct tcg_temp_info *temps = tcg_ctx->opt_temps;
+
+    if (!test_bit(temp, tcg_ctx->opt_temps_used.l)) {
         temps[temp].next_copy = temp;
         temps[temp].prev_copy = temp;
         temps[temp].is_const = false;
         temps[temp].mask = -1;
-        set_bit(temp, temps_used.l);
+        set_bit(temp, tcg_ctx->opt_temps_used.l);
     }
 }
 
@@ -118,6 +111,7 @@ static TCGOpcode op_to_movi(TCGOpcode op)
 
 static TCGArg find_better_copy(TCGContext *s, TCGArg temp)
 {
+    struct tcg_temp_info *temps = tcg_ctx->opt_temps;
     TCGArg i;
 
     /* If this is already a global, we can't do better. */
@@ -147,6 +141,7 @@ static TCGArg find_better_copy(TCGContext *s, TCGArg temp)
 
 static bool temps_are_copies(TCGArg arg1, TCGArg arg2)
 {
+    struct tcg_temp_info *temps = tcg_ctx->opt_temps;
     TCGArg i;
 
     if (arg1 == arg2) {
@@ -169,6 +164,7 @@ static bool temps_are_copies(TCGArg arg1, TCGArg arg2)
 static void tcg_opt_gen_movi(TCGContext *s, TCGOp *op, TCGArg *args,
                              TCGArg dst, TCGArg val)
 {
+    struct tcg_temp_info *temps = tcg_ctx->opt_temps;
     TCGOpcode new_op = op_to_movi(op->opc);
     tcg_target_ulong mask;
 
@@ -196,6 +192,7 @@ static void tcg_opt_gen_mov(TCGContext *s, TCGOp *op, TCGArg *args,
         return;
     }
 
+    struct tcg_temp_info *temps = tcg_ctx->opt_temps;
     TCGOpcode new_op = op_to_mov(op->opc);
     tcg_target_ulong mask;
 
@@ -466,6 +463,8 @@ static bool do_constant_folding_cond_eq(TCGCond c)
 static TCGArg do_constant_folding_cond(TCGOpcode op, TCGArg x,
                                        TCGArg y, TCGCond c)
 {
+    struct tcg_temp_info *temps = tcg_ctx->opt_temps;
+
     if (temp_is_const(x) && temp_is_const(y)) {
         switch (op_bits(op)) {
         case 32:
@@ -494,6 +493,7 @@ static TCGArg do_constant_folding_cond(TCGOpcode op, TCGArg x,
    of the condition (0 or 1) if it can */
 static TCGArg do_constant_folding_cond2(TCGArg *p1, TCGArg *p2, TCGCond c)
 {
+    struct tcg_temp_info *temps = tcg_ctx->opt_temps;
     TCGArg al = p1[0], ah = p1[1];
     TCGArg bl = p2[0], bh = p2[1];
 
@@ -558,8 +558,14 @@ static bool swap_commutative2(TCGArg *p1, TCGArg *p2)
 /* Propagate constants and copies, fold constant expressions. */
 void tcg_optimize(TCGContext *s)
 {
+    struct tcg_temp_info *temps;
     int oi, oi_next, nb_temps, nb_globals;
     TCGArg *prev_mb_args = NULL;
+
+    if (tcg_ctx->opt_temps == NULL) {
+        tcg_ctx->opt_temps = g_new(struct tcg_temp_info, TCG_MAX_TEMPS);
+    }
+    temps = tcg_ctx->opt_temps;
 
     /* Array VALS has an element for each temp.
        If this temp holds a constant then its value is kept in VALS' element.
@@ -1360,7 +1366,7 @@ void tcg_optimize(TCGContext *s)
             if (!(args[nb_oargs + nb_iargs + 1]
                   & (TCG_CALL_NO_READ_GLOBALS | TCG_CALL_NO_WRITE_GLOBALS))) {
                 for (i = 0; i < nb_globals; i++) {
-                    if (test_bit(i, temps_used.l)) {
+                    if (test_bit(i, tcg_ctx->opt_temps_used.l)) {
                         reset_temp(i);
                     }
                 }
