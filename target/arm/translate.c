@@ -4499,8 +4499,13 @@ static void gen_exception_return(DisasContext *s, TCGv_i32 pc)
 static void gen_nop_hint(DisasContext *s, int val)
 {
     switch (val) {
+        /* When running in MTTCG we don't generate jumps to the yield and
+         * WFE helpers as it won't affect the scheduling of other vCPUs.
+         * If we wanted to more completely model WFE/SEV so we don't busy
+         * spin unnecessarily we would need to do something more involved.
+         */
     case 1: /* yield */
-        if (!parallel_cpus) {
+        if (!(tb_cflags(s->tb) & CF_PARALLEL)) {
             gen_set_pc_im(s, s->pc);
             s->is_jmp = DISAS_YIELD;
         }
@@ -4510,7 +4515,7 @@ static void gen_nop_hint(DisasContext *s, int val)
         s->is_jmp = DISAS_WFI;
         break;
     case 2: /* wfe */
-        if (!parallel_cpus) {
+        if (!(tb_cflags(s->tb) & CF_PARALLEL)) {
             gen_set_pc_im(s, s->pc);
             s->is_jmp = DISAS_WFE;
         }
