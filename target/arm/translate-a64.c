@@ -1333,13 +1333,18 @@ static void handle_hint(DisasContext *s, uint32_t insn,
     case 3: /* WFI */
         s->is_jmp = DISAS_WFI;
         return;
+        /* When running in MTTCG we don't generate jumps to the yield and
+         * WFE helpers as it won't affect the scheduling of other vCPUs.
+         * If we wanted to more completely model WFE/SEV so we don't busy
+         * spin unnecessarily we would need to do something more involved.
+         */
     case 1: /* YIELD */
-        if (!parallel_cpus) {
+        if (!(s->tb->cflags & CF_PARALLEL)) {
             s->is_jmp = DISAS_YIELD;
         }
         return;
     case 2: /* WFE */
-        if (!parallel_cpus) {
+        if (!(s->tb->cflags & CF_PARALLEL)) {
             s->is_jmp = DISAS_WFE;
         }
         return;
@@ -1916,11 +1921,25 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
             tcg_gen_setcond_i64(TCG_COND_NE, tmp, tmp, val);
             tcg_temp_free_i64(val);
         } else if (s->be_data == MO_LE) {
-            gen_helper_paired_cmpxchg64_le(tmp, cpu_env, addr, cpu_reg(s, rt),
-                                           cpu_reg(s, rt2));
+            if (s->tb->cflags & CF_PARALLEL) {
+                gen_helper_paired_cmpxchg64_le_parallel(tmp, cpu_env, addr,
+                                                        cpu_reg(s, rt),
+                                                        cpu_reg(s, rt2));
+            } else {
+                gen_helper_paired_cmpxchg64_le(tmp, cpu_env, addr,
+                                               cpu_reg(s, rt),
+                                               cpu_reg(s, rt2));
+            }
         } else {
-            gen_helper_paired_cmpxchg64_be(tmp, cpu_env, addr, cpu_reg(s, rt),
-                                           cpu_reg(s, rt2));
+            if (s->tb->cflags & CF_PARALLEL) {
+                gen_helper_paired_cmpxchg64_be_parallel(tmp, cpu_env, addr,
+                                                        cpu_reg(s, rt),
+                                                        cpu_reg(s, rt2));
+            } else {
+                gen_helper_paired_cmpxchg64_be(tmp, cpu_env, addr,
+                                               cpu_reg(s, rt),
+                                               cpu_reg(s, rt2));
+            }
         }
     } else {
         TCGv_i64 val = cpu_reg(s, rt);
