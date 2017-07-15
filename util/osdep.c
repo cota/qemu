@@ -46,6 +46,9 @@ extern int madvise(caddr_t, size_t, int);
 #define QEMU_GETLK F_GETLK
 #endif
 
+uintptr_t qemu_real_host_page_size;
+intptr_t qemu_real_host_page_mask;
+
 static bool fips_enabled = false;
 
 static const char *hw_version = QEMU_HW_VERSION;
@@ -63,6 +66,12 @@ int socket_set_nodelay(int fd)
 {
     int v = 1;
     return qemu_setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &v, sizeof(v));
+}
+
+void real_host_page_size_init(void)
+{
+    qemu_real_host_page_size = getpagesize();
+    qemu_real_host_page_mask = -(intptr_t)qemu_real_host_page_size;
 }
 
 int qemu_madvise(void *addr, size_t len, int advice)
