@@ -90,6 +90,46 @@ int qemu_madvise(void *addr, size_t len, int advice)
 #endif
 }
 
+static int qemu_mprotect__osdep(void *addr, size_t size, int prot)
+{
+    void *start = QEMU_ALIGN_PTR_DOWN(addr, qemu_real_host_page_size);
+    void *end = QEMU_ALIGN_PTR_UP(addr + size, qemu_real_host_page_size);
+#ifdef _WIN32
+    DWORD old_protect;
+
+    if (!VirtualProtect(start, end - start, prot, &old_protect)) {
+        error_report("%s: VirtualProtect failed with error code %d",
+                     __func__, GetLastError());
+        return -1;
+    }
+    return 0;
+#else
+    if (mprotect(start, end - start, prot)) {
+        error_report("%s: mprotect failed: %s", __func__, strerror(errno));
+        return -1;
+    }
+    return 0;
+#endif
+}
+
+int qemu_mprotect_rwx(void *addr, size_t size)
+{
+#ifdef _WIN32
+    return qemu_mprotect__osdep(addr, size, PAGE_EXECUTE_READWRITE);
+#else
+    return qemu_mprotect__osdep(addr, size, PROT_READ | PROT_WRITE | PROT_EXEC);
+#endif
+}
+
+int qemu_mprotect_none(void *addr, size_t size)
+{
+#ifdef _WIN32
+    return qemu_mprotect__osdep(addr, size, PAGE_NOACCESS);
+#else
+    return qemu_mprotect__osdep(addr, size, PROT_NONE);
+#endif
+}
+
 #ifndef _WIN32
 /*
  * Dups an fd and sets the flags
