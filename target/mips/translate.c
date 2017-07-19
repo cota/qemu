@@ -5326,11 +5326,11 @@ static void gen_mfc0(DisasContext *ctx, TCGv arg, int reg, int sel)
         switch (sel) {
         case 0:
             /* Mark as an IO operation because we read the time.  */
-            if (ctx->tb->cflags & CF_USE_ICOUNT) {
+            if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
                 gen_io_start();
 	    }
             gen_helper_mfc0_count(arg, cpu_env);
-            if (ctx->tb->cflags & CF_USE_ICOUNT) {
+            if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
                 gen_io_end();
             }
             /* Break the TB to be able to take timer interrupts immediately
@@ -5731,7 +5731,7 @@ static void gen_mtc0(DisasContext *ctx, TCGv arg, int reg, int sel)
     if (sel != 0)
         check_insn(ctx, ISA_MIPS32);
 
-    if (ctx->tb->cflags & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
 
@@ -6395,7 +6395,7 @@ static void gen_mtc0(DisasContext *ctx, TCGv arg, int reg, int sel)
     trace_mips_translate_c0("mtc0", rn, reg, sel);
 
     /* For simplicity assume that all writes can cause interrupts.  */
-    if (ctx->tb->cflags & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
         gen_io_end();
         ctx->bstate = BS_STOP;
     }
@@ -6670,11 +6670,11 @@ static void gen_dmfc0(DisasContext *ctx, TCGv arg, int reg, int sel)
         switch (sel) {
         case 0:
             /* Mark as an IO operation because we read the time.  */
-            if (ctx->tb->cflags & CF_USE_ICOUNT) {
+            if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
                 gen_io_start();
             }
             gen_helper_mfc0_count(arg, cpu_env);
-            if (ctx->tb->cflags & CF_USE_ICOUNT) {
+            if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
                 gen_io_end();
             }
             /* Break the TB to be able to take timer interrupts immediately
@@ -7061,7 +7061,7 @@ static void gen_dmtc0(DisasContext *ctx, TCGv arg, int reg, int sel)
     if (sel != 0)
         check_insn(ctx, ISA_MIPS64);
 
-    if (ctx->tb->cflags & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
 
@@ -7393,11 +7393,11 @@ static void gen_dmtc0(DisasContext *ctx, TCGv arg, int reg, int sel)
             save_cpu_state(ctx, 1);
             /* Mark as an IO operation because we may trigger a software
                interrupt.  */
-            if (ctx->tb->cflags & CF_USE_ICOUNT) {
+            if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
                 gen_io_start();
             }
             gen_helper_mtc0_cause(cpu_env, arg);
-            if (ctx->tb->cflags & CF_USE_ICOUNT) {
+            if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
                 gen_io_end();
             }
             /* Stop translation as we may have triggered an intetrupt */
@@ -7723,7 +7723,7 @@ static void gen_dmtc0(DisasContext *ctx, TCGv arg, int reg, int sel)
     trace_mips_translate_c0("dmtc0", rn, reg, sel);
 
     /* For simplicity assume that all writes can cause interrupts.  */
-    if (ctx->tb->cflags & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
         gen_io_end();
         ctx->bstate = BS_STOP;
     }
@@ -20227,7 +20227,7 @@ void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
     ctx.default_tcg_memop_mask = (ctx.insn_flags & ISA_MIPS32R6) ?
                                  MO_UNALN : MO_ALIGN;
     num_insns = 0;
-    max_insns = tb->cflags & CF_COUNT_MASK;
+    max_insns = tb_cflags(tb) & CF_COUNT_MASK;
     if (max_insns == 0) {
         max_insns = CF_COUNT_MASK;
     }
@@ -20253,7 +20253,7 @@ void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
             goto done_generating;
         }
 
-        if (num_insns == max_insns && (tb->cflags & CF_LAST_IO)) {
+        if (num_insns == max_insns && (tb_cflags(tb) & CF_LAST_IO)) {
             gen_io_start();
         }
 
@@ -20314,7 +20314,7 @@ void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
         if (singlestep)
             break;
     }
-    if (tb->cflags & CF_LAST_IO) {
+    if (tb_cflags(tb) & CF_LAST_IO) {
         gen_io_end();
     }
     if (cs->singlestep_enabled && ctx.bstate != BS_BRANCH) {
