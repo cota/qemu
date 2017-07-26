@@ -206,8 +206,6 @@ void tb_lock_reset(void)
     }
 }
 
-static TranslationBlock *tb_find_pc(uintptr_t tc_ptr);
-
 void cpu_gen_init(void)
 {
     tcg_context_init(&tcg_init_ctx);
@@ -364,7 +362,7 @@ bool cpu_restore_state(CPUState *cpu, uintptr_t retaddr)
      * != 0 before attempting to restore state. We return early to
      * avoid blowing up on a recursive tb_lock(). The target must have
      * previously survived a failed cpu_restore_state because
-     * tb_find_pc(0) would have failed anyway. It still should be
+     * tcg_tb_lookup(0) would have failed anyway. It still should be
      * fixed though.
      */
 
@@ -373,13 +371,13 @@ bool cpu_restore_state(CPUState *cpu, uintptr_t retaddr)
     }
 
     tb_lock();
-    tb = tb_find_pc(retaddr);
+    tb = tcg_tb_lookup(retaddr);
     if (tb) {
         cpu_restore_state_from_tb(cpu, tb, retaddr);
         if (tb->cflags & CF_NOCACHE) {
             /* one-shot translation, invalidate it immediately */
             tb_phys_invalidate(tb, -1);
-            tb_remove(tb);
+            tcg_tb_remove(tb);
         }
         r = true;
     }
@@ -728,48 +726,6 @@ static inline void *alloc_code_gen_buffer(void)
 }
 #endif /* USE_STATIC_CODE_GEN_BUFFER, WIN32, POSIX */
 
-/* compare a pointer @ptr and a tb_tc @s */
-static int ptr_cmp_tb_tc(const void *ptr, const struct tb_tc *s)
-{
-    if (ptr >= s->ptr + s->size) {
-        return 1;
-    } else if (ptr < s->ptr) {
-        return -1;
-    }
-    return 0;
-}
-
-static gint tb_tc_cmp(gconstpointer ap, gconstpointer bp)
-{
-    const struct tb_tc *a = ap;
-    const struct tb_tc *b = bp;
-
-    /*
-     * When both sizes are set, we know this isn't a lookup and therefore
-     * the two buffers are non-overlapping.
-     * This is the most likely case: every TB must be inserted; lookups
-     * are a lot less frequent.
-     */
-    if (likely(a->size && b->size)) {
-        /* a->ptr == b->ptr would mean the buffers overlap */
-        g_assert(a->ptr != b->ptr);
-
-        if (a->ptr > b->ptr) {
-            return 1;
-        }
-        return -1;
-    }
-    /*
-     * All lookups have either .size field set to 0.
-     * From the glib sources we see that @ap is always the lookup key. However
-     * the docs provide no guarantee, so we just mark this case as likely.
-     */
-    if (likely(a->size == 0)) {
-        return ptr_cmp_tb_tc(a->ptr, b);
-    }
-    return ptr_cmp_tb_tc(b->ptr, a);
-}
-
 static inline void code_gen_alloc(size_t tb_size)
 {
     tcg_ctx->code_gen_buffer_size = size_code_gen_buffer(tb_size);
@@ -778,7 +734,6 @@ static inline void code_gen_alloc(size_t tb_size)
         fprintf(stderr, "Could not allocate dynamic translator buffer\n");
         exit(1);
     }
-    tb_ctx.tb_tree = g_tree_new(tb_tc_cmp);
     qemu_mutex_init(&tb_ctx.tb_lock);
 }
 
@@ -837,14 +792,6 @@ static TranslationBlock *tb_alloc(target_ulong pc)
         return NULL;
     }
     return tb;
-}
-
-/* Called with tb_lock held.  */
-void tb_remove(TranslationBlock *tb)
-{
-    assert_tb_locked();
-
-    g_tree_remove(tb_ctx.tb_tree, &tb->tc);
 }
 
 static inline void invalidate_page_bitmap(PageDesc *p)
@@ -911,10 +858,10 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     }
 
     if (DEBUG_TB_FLUSH_GATE) {
-        size_t nb_tbs = g_tree_nnodes(tb_ctx.tb_tree);
+        size_t nb_tbs = tcg_nb_tbs();
         size_t host_size = 0;
 
-        g_tree_foreach(tb_ctx.tb_tree, tb_host_size_iter, &host_size);
+        tcg_tb_foreach(tb_host_size_iter, &host_size);
         printf("qemu: flush code_size=%zu nb_tbs=%zu avg_tb_size=%zu\n",
                tcg_code_size(), nb_tbs, nb_tbs > 0 ? host_size / nb_tbs : 0);
     }
@@ -922,10 +869,6 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     CPU_FOREACH(cpu) {
         cpu_tb_jmp_cache_clear(cpu);
     }
-
-    /* Increment the refcount first so that destroy acts as a reset */
-    g_tree_ref(tb_ctx.tb_tree);
-    g_tree_destroy(tb_ctx.tb_tree);
 
     qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
     page_flush_tb();
@@ -1387,7 +1330,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
      * through the physical hash table and physical page list.
      */
     tb_link_page(tb, phys_pc, phys_page2);
-    g_tree_insert(tb_ctx.tb_tree, &tb->tc, tb);
+    tcg_tb_insert(tb);
     return tb;
 }
 
@@ -1493,7 +1436,7 @@ void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
                 current_tb = NULL;
                 if (cpu->mem_io_pc) {
                     /* now we have a real cpu fault */
-                    current_tb = tb_find_pc(cpu->mem_io_pc);
+                    current_tb = tcg_tb_lookup(cpu->mem_io_pc);
                 }
             }
             if (current_tb == tb &&
@@ -1612,7 +1555,7 @@ static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
     tb = p->first_tb;
 #ifdef TARGET_HAS_PRECISE_SMC
     if (tb && pc != 0) {
-        current_tb = tb_find_pc(pc);
+        current_tb = tcg_tb_lookup(pc);
     }
     if (cpu != NULL) {
         env = cpu->env_ptr;
@@ -1658,18 +1601,6 @@ static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
 }
 #endif
 
-/*
- * Find the TB 'tb' such that
- * tb->tc.ptr <= tc_ptr < tb->tc.ptr + tb->tc.size
- * Return NULL if not found.
- */
-static TranslationBlock *tb_find_pc(uintptr_t tc_ptr)
-{
-    struct tb_tc s = { .ptr = (void *)tc_ptr };
-
-    return g_tree_lookup(tb_ctx.tb_tree, &s);
-}
-
 #if !defined(CONFIG_USER_ONLY)
 void tb_invalidate_phys_addr(AddressSpace *as, hwaddr addr)
 {
@@ -1697,7 +1628,7 @@ void tb_check_watchpoint(CPUState *cpu)
 {
     TranslationBlock *tb;
 
-    tb = tb_find_pc(cpu->mem_io_pc);
+    tb = tcg_tb_lookup(cpu->mem_io_pc);
     if (tb) {
         /* We can use retranslation to find the PC.  */
         cpu_restore_state_from_tb(cpu, tb, cpu->mem_io_pc);
@@ -1733,7 +1664,7 @@ void cpu_io_recompile(CPUState *cpu, uintptr_t retaddr)
     uint32_t flags;
 
     tb_lock();
-    tb = tb_find_pc(retaddr);
+    tb = tcg_tb_lookup(retaddr);
     if (!tb) {
         cpu_abort(cpu, "cpu_io_recompile: could not find TB for pc=%p",
                   (void *)retaddr);
@@ -1780,7 +1711,7 @@ void cpu_io_recompile(CPUState *cpu, uintptr_t retaddr)
              * cpu_exec_nocache() */
             tb_phys_invalidate(tb->orig_tb, -1);
         }
-        tb_remove(tb);
+        tcg_tb_remove(tb);
     }
     /* FIXME: In theory this could raise an exception.  In practice
        we have already translated the block once so it's probably ok.  */
@@ -1854,6 +1785,7 @@ static void print_qht_statistics(FILE *f, fprintf_function cpu_fprintf,
 }
 
 struct tb_tree_stats {
+    size_t nb_tbs;
     size_t host_size;
     size_t target_size;
     size_t max_target_size;
@@ -1867,6 +1799,7 @@ static gboolean tb_tree_stats_iter(gpointer key, gpointer value, gpointer data)
     const TranslationBlock *tb = value;
     struct tb_tree_stats *tst = data;
 
+    tst->nb_tbs++;
     tst->host_size += tb->tc.size;
     tst->target_size += tb->size;
     if (tb->size > tst->max_target_size) {
@@ -1892,8 +1825,8 @@ void dump_exec_info(FILE *f, fprintf_function cpu_fprintf)
 
     tb_lock();
 
-    nb_tbs = g_tree_nnodes(tb_ctx.tb_tree);
-    g_tree_foreach(tb_ctx.tb_tree, tb_tree_stats_iter, &tst);
+    tcg_tb_foreach(tb_tree_stats_iter, &tst);
+    nb_tbs = tst.nb_tbs;
     /* XXX: avoid using doubles ? */
     cpu_fprintf(f, "Translation buffer state:\n");
     /*
