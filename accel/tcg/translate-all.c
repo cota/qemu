@@ -115,6 +115,25 @@ typedef struct PageDesc {
 #endif
 } PageDesc;
 
+/* list iterators for lists of tagged pointers in TranslationBlock */
+#define tb_for_each_tagged(head, tb, n, field)                  \
+    for (n = (head) & 1,                                        \
+             tb = (TranslationBlock *)((head) & ~1);            \
+         tb;                                                    \
+         tb = (TranslationBlock *)tb->field[n],                 \
+             n = (uintptr_t)tb & 1,                             \
+             tb = (TranslationBlock *)((uintptr_t)tb & ~1))
+
+/* prev is a *uintptr_t. It allows us to safely remove tb */
+#define tb_for_each_tagged_safe(head, tb, n, field, prev)       \
+    for (prev = &(head),                                        \
+             n = *prev & 1,                                     \
+             tb = (TranslationBlock *)(*prev & ~1);             \
+         tb;                                                    \
+         prev = &tb->field[n],                                  \
+             n = (uintptr_t)*prev & 1,                          \
+             tb = (TranslationBlock *)(*prev & ~1))
+
 /* In system mode we want L1_MAP to be based on ram offsets,
    while in user mode we want it to be based on virtual addresses.  */
 #if !defined(CONFIG_USER_ONLY)
