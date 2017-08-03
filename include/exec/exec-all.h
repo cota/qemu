@@ -367,7 +367,7 @@ struct TranslationBlock {
 #define CF_NOCACHE     0x10000 /* To be freed after execution */
 #define CF_USE_ICOUNT  0x20000
 #define CF_IGNORE_ICOUNT 0x40000 /* Do not generate icount code */
-#define CF_INVALID     0x80000 /* TB is stale. Setters must acquire tb_lock */
+#define CF_INVALID     0x80000 /* TB is stale. Protected by tb->jmp_lock */
 #define CF_PARALLEL    0x100000 /* Generate code for a parallel context */
 /* cflags' mask for hashing/comparison */
 #define CF_HASH_MASK (CF_COUNT_MASK | CF_PARALLEL)
@@ -399,20 +399,27 @@ struct TranslationBlock {
 #else
     uintptr_t jmp_target_addr[2]; /* target address for indirect jump */
 #endif
-    /* Each TB has an associated circular list of TBs jumping to this one.
-     * jmp_list_first points to the first TB jumping to this one.
-     * jmp_list_next is used to point to the next TB in a list.
-     * Since each TB can have two jumps, it can participate in two lists.
-     * jmp_list_first and jmp_list_next are 4-byte aligned pointers to a
-     * TranslationBlock structure, but the two least significant bits of
-     * them are used to encode which data field of the pointed TB should
-     * be used to traverse the list further from that TB:
-     * 0 => jmp_list_next[0], 1 => jmp_list_next[1], 2 => jmp_list_first.
-     * In other words, 0/1 tells which jump is used in the pointed TB,
-     * and 2 means that this is a pointer back to the target TB of this list.
+    /*
+     * Each TB has a NULL-terminated list (jmp_list_head) of incoming jumps.
+     * Each TB can have two outgoing jumps, and therefore can participate
+     * in two lists. The list entries are kept in jmp_list_next[2]. The least
+     * significant bit (LSB) of the pointers in these lists is used to encode
+     * which of the two list entries is to be used in the pointed TB.
+     *
+     * List traversals are protected by jmp_lock. The destination TB of each
+     * outgoing jump is kept in jmp_dest[] so that the appropriate jmp_lock
+     * can be acquired from any origin TB.
+     *
+     * jmp_dest[] are tagged pointers as well. The LSB is set when the TB is
+     * being invalidated, so that no further outgoing jumps from it can be set.
+     *
+     * jmp_lock also protects the CF_INVALID cflag; a jump must not be chained
+     * to a destination TB that has CF_INVALID set.
      */
+    uintptr_t jmp_list_head;
     uintptr_t jmp_list_next[2];
-    uintptr_t jmp_list_first;
+    uintptr_t jmp_dest[2];
+    QemuSpin jmp_lock;
 };
 
 extern bool parallel_cpus;
@@ -489,28 +496,47 @@ static inline void tb_set_jmp_target(TranslationBlock *tb,
 
 #endif
 
-/* Called with tb_lock held.  */
 static inline void tb_add_jump(TranslationBlock *tb, int n,
                                TranslationBlock *tb_next)
 {
-    assert(n < ARRAY_SIZE(tb->jmp_list_next));
-    if (tb->jmp_list_next[n]) {
-        /* Another thread has already done this while we were
-         * outside of the lock; nothing to do in this case */
-        return;
+    uintptr_t old;
+
+    qemu_spin_lock(&tb_next->jmp_lock);
+
+    /* make sure the destination TB is valid */
+    if (tb_next->cflags & CF_INVALID) {
+        goto out_unlock_next;
     }
+    /*
+     * Atomically claim the jump destination slot only if it was NULL.
+     * This implies a full barrier that pairs with the write barrier before
+     * setting jmp_dest[n] to NULL in tb_jmp_unlink, thereby guaranteeing that
+     * we see jmp_target/addr in a consistent state.
+     */
+    old = atomic_cmpxchg(&tb->jmp_dest[n], (uintptr_t)NULL, (uintptr_t)tb_next);
+    if (old) {
+        goto out_unlock_next;
+    }
+
+    /* patch the native jump address */
+    tb_set_jmp_target(tb, n, (uintptr_t)tb_next->tc.ptr);
+
+    /* add in TB jmp list */
+    tb->jmp_list_next[n] = tb_next->jmp_list_head;
+    tb_next->jmp_list_head = (uintptr_t)tb | n;
+
+    qemu_spin_unlock(&tb_next->jmp_lock);
+
     qemu_log_mask_and_addr(CPU_LOG_EXEC, tb->pc,
                            "Linking TBs %p [" TARGET_FMT_lx
                            "] index %d -> %p [" TARGET_FMT_lx "]\n",
                            tb->tc.ptr, tb->pc, n,
                            tb_next->tc.ptr, tb_next->pc);
+    return;
 
-    /* patch the native jump address */
-    tb_set_jmp_target(tb, n, (uintptr_t)tb_next->tc.ptr);
-
-    /* add in TB jmp circular list */
-    tb->jmp_list_next[n] = tb_next->jmp_list_first;
-    tb_next->jmp_list_first = (uintptr_t)tb | n;
+ out_unlock_next:
+    qemu_spin_unlock(&tb_next->jmp_lock);
+    return;
 }
 
 /* GETPC is the true target of the return instruction that we'll execute.  */

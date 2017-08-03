@@ -187,6 +187,12 @@ struct page_collection {
 #define page_for_each_tb_safe(pagedesc, tb, n, prev)                    \
     tb_for_each_tagged_safe((pagedesc)->first_tb, tb, n, page_next, prev)
 
+#define tb_for_each_jmp(head_tb, tb, n)                                 \
+    tb_for_each_tagged((head_tb)->jmp_list_head, tb, n, jmp_list_next)
+
+#define tb_for_each_jmp_safe(dest, tb, n, prev)                         \
+    tb_for_each_tagged_safe((dest)->jmp_list_head, tb, n, jmp_list_next, prev)
+
 /* In system mode we want L1_MAP to be based on ram offsets,
    while in user mode we want it to be based on virtual addresses.  */
 #if !defined(CONFIG_USER_ONLY)
@@ -1271,33 +1277,50 @@ static inline void tb_page_remove(PageDesc *pd, TranslationBlock *tb)
 }
 
 /* remove the TB from a list of TBs jumping to the n-th jump target of the TB */
-static inline void tb_remove_from_jmp_list(TranslationBlock *tb, int n)
+static inline void tb_remove_from_jmp_list(TranslationBlock *orig, int n_orig)
 {
-    TranslationBlock *tb1;
-    uintptr_t *ptb, ntb;
-    unsigned int n1;
+    uintptr_t ptr, ptr_locked;
+    TranslationBlock *dest;
+    TranslationBlock *tb;
+    uintptr_t *prev;
+    int n;
 
-    ptb = &tb->jmp_list_next[n];
-    if (*ptb) {
-        /* find tb(n) in circular list */
-        for (;;) {
-            ntb = *ptb;
-            n1 = ntb & 3;
-            tb1 = (TranslationBlock *)(ntb & ~3);
-            if (n1 == n && tb1 == tb) {
-                break;
-            }
-            if (n1 == 2) {
-                ptb = &tb1->jmp_list_first;
-            } else {
-                ptb = &tb1->jmp_list_next[n1];
-            }
-        }
-        /* now we can suppress tb(n) from the list */
-        *ptb = tb->jmp_list_next[n];
+    /* mark the LSB of jmp_dest[] so that no further jumps can be inserted */
+    ptr = atomic_or_fetch(&orig->jmp_dest[n_orig], 1);
 
-        tb->jmp_list_next[n] = (uintptr_t)NULL;
+    dest = (TranslationBlock *)(ptr & ~1);
+    if (dest == NULL) {
+        return;
     }
+
+    qemu_spin_lock(&dest->jmp_lock);
+    /*
+     * While acquiring the lock, the jump might have been removed if the
+     * destination TB was invalidated; check again.
+     */
+    ptr_locked = atomic_read(&orig->jmp_dest[n_orig]);
+    if (ptr_locked != ptr) {
+        qemu_spin_unlock(&dest->jmp_lock);
+        /*
+         * The only possibility is that the jump was invalidated. Another
+         * insertion would be a bug, because we set the LSB above.
+         */
+        g_assert(ptr_locked == 1);
+        return;
+    }
+    /*
+     * We first acquired the lock, and since the destination pointer matches,
+     * we know for sure that @orig is in the jmp list.
+     */
+    tb_for_each_jmp_safe(dest, tb, n, prev) {
+        if (tb == orig && n == n_orig) {
+            *prev = tb->jmp_list_next[n];
+            /* no need to set tb->jmp_dest[n]; setting the LSB was enough */
+            qemu_spin_unlock(&dest->jmp_lock);
+            return;
+        }
+    }
+    g_assert_not_reached();
 }
 
 /* reset the jump entry 'n' of a TB so that it is not chained to
@@ -1309,24 +1332,26 @@ static inline void tb_reset_jump(TranslationBlock *tb, int n)
 }
 
 /* remove any jumps to the TB */
-static inline void tb_jmp_unlink(TranslationBlock *tb)
+static inline void tb_jmp_unlink(TranslationBlock *dest)
 {
-    TranslationBlock *tb1;
-    uintptr_t *ptb, ntb;
-    unsigned int n1;
+    TranslationBlock *tb;
+    int n;
 
-    ptb = &tb->jmp_list_first;
-    for (;;) {
-        ntb = *ptb;
-        n1 = ntb & 3;
-        tb1 = (TranslationBlock *)(ntb & ~3);
-        if (n1 == 2) {
-            break;
-        }
-        tb_reset_jump(tb1, n1);
-        *ptb = tb1->jmp_list_next[n1];
-        tb1->jmp_list_next[n1] = (uintptr_t)NULL;
+    qemu_spin_lock(&dest->jmp_lock);
+
+    tb_for_each_jmp(dest, tb, n) {
+        tb_reset_jump(tb, n);
+        /*
+         * The write barrier here pairs with cmpxchg's full barrier in
+         * tb_add_jump, thereby ensuring that the jmp_target/addr will be in a
+         * consistent state right before NULL is set.
+         */
+        atomic_rcu_set(&tb->jmp_dest[n], (uintptr_t)NULL);
+        /* setting the dest ptr is enough; no need to clear the list entry */
     }
+    dest->jmp_list_head = (uintptr_t)NULL;
+
+    qemu_spin_unlock(&dest->jmp_lock);
 }
 
 /* If @rm_from_page_list is set, call with the TB's pages' locks held */
@@ -1339,7 +1364,10 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
 
     assert_tb_locked();
 
+    /* make sure no further incoming jumps will be chained to this TB */
+    qemu_spin_lock(&tb->jmp_lock);
     atomic_set(&tb->cflags, tb->cflags | CF_INVALID);
+    qemu_spin_unlock(&tb->jmp_lock);
 
     /* remove the TB from the hash list */
     phys_pc = tb->page_addr[0] + (tb->pc & ~TARGET_PAGE_MASK);
@@ -1673,10 +1701,12 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
                  CODE_GEN_ALIGN));
 
     /* init jump list */
-    assert(((uintptr_t)tb & 3) == 0);
-    tb->jmp_list_first = (uintptr_t)tb | 2;
+    qemu_spin_init(&tb->jmp_lock);
+    tb->jmp_list_head = (uintptr_t)NULL;
     tb->jmp_list_next[0] = (uintptr_t)NULL;
     tb->jmp_list_next[1] = (uintptr_t)NULL;
+    tb->jmp_dest[0] = (uintptr_t)NULL;
+    tb->jmp_dest[1] = (uintptr_t)NULL;
 
     /* init original jump addresses wich has been set during tcg_gen_code() */
     if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {

@@ -366,9 +366,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
             tb_lock();
             acquired_tb_lock = true;
         }
-        if (!(tb->cflags & CF_INVALID)) {
-            tb_add_jump(last_tb, tb_exit, tb);
-        }
+        tb_add_jump(last_tb, tb_exit, tb);
     }
     if (acquired_tb_lock) {
         tb_unlock();
