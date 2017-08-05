@@ -1915,10 +1915,12 @@ void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t end)
 /* len must be <= 8 and start must be a multiple of len.
  * Called via softmmu_template.h when code areas are written to with
  * iothread mutex not held.
+ *
+ * Call with all @pages in the range [@start, @start + len[ locked.
  */
-void tb_invalidate_phys_page_fast(tb_page_addr_t start, int len)
+void tb_invalidate_phys_page_fast(struct page_collection *pages,
+                                  tb_page_addr_t start, int len)
 {
-    struct page_collection *pages;
     PageDesc *p;
 
 #if 0
@@ -1937,7 +1939,6 @@ void tb_invalidate_phys_page_fast(tb_page_addr_t start, int len)
         return;
     }
 
-    pages = page_collection_lock(start, start + len);
     if (!p->code_bitmap &&
         ++p->code_write_count >= SMC_BITMAP_USE_THRESHOLD) {
         build_page_bitmap(p);
@@ -1955,7 +1956,6 @@ void tb_invalidate_phys_page_fast(tb_page_addr_t start, int len)
     do_invalidate:
         tb_invalidate_phys_page_range__locked(pages, p, start, start + len, 1);
     }
-    page_collection_unlock(pages);
 }
 #else
 /* Called with mmap_lock held. If pc is not 0 then it indicates the

@@ -2331,13 +2331,12 @@ ram_addr_t qemu_ram_addr_from_host(void *ptr)
 static void notdirty_mem_write(void *opaque, hwaddr ram_addr,
                                uint64_t val, unsigned size)
 {
-    bool locked = false;
+    struct page_collection *pages = NULL;
 
     assert(tcg_enabled());
     if (!cpu_physical_memory_get_dirty_flag(ram_addr, DIRTY_MEMORY_CODE)) {
-        locked = true;
-        tb_lock();
-        tb_invalidate_phys_page_fast(ram_addr, size);
+        pages = page_collection_lock(ram_addr, ram_addr + size);
+        tb_invalidate_phys_page_fast(pages, ram_addr, size);
     }
     switch (size) {
     case 1:
@@ -2353,8 +2352,8 @@ static void notdirty_mem_write(void *opaque, hwaddr ram_addr,
         abort();
     }
 
-    if (locked) {
-        tb_unlock();
+    if (pages) {
+        page_collection_unlock(pages);
     }
 
     /* Set both VGA and migration bits for simplicity and to remove
