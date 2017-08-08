@@ -3,6 +3,7 @@
 
 #include "qemu/processor.h"
 #include "qemu/atomic.h"
+#include "qemu/qlp.h"
 
 typedef struct QemuMutex QemuMutex;
 typedef struct QemuCond QemuCond;
@@ -20,10 +21,18 @@ typedef struct QemuThread QemuThread;
 #define QEMU_THREAD_JOINABLE 0
 #define QEMU_THREAD_DETACHED 1
 
+#ifdef CONFIG_LOCK_PROFILER
+# define qemu_mutex_lock(m)    qlp_mutex_lock(m, __FILE__, __LINE__)
+# define qemu_mutex_trylock(m) qlp_mutex_trylock(m, __FILE__, __LINE__)
+#else
+# define qemu_mutex_lock(m)    do_qemu_mutex_lock(m)
+# define qemu_mutex_trylock(m) do_qemu_mutex_trylock(m)
+#endif /* !CONFIG_LOCK_PROFILER */
+
 void qemu_mutex_init(QemuMutex *mutex);
 void qemu_mutex_destroy(QemuMutex *mutex);
-void qemu_mutex_lock(QemuMutex *mutex);
-int qemu_mutex_trylock(QemuMutex *mutex);
+void do_qemu_mutex_lock(QemuMutex *mutex);
+int do_qemu_mutex_trylock(QemuMutex *mutex);
 void qemu_mutex_unlock(QemuMutex *mutex);
 
 /* Prototypes for other functions are in thread-posix.h/thread-win32.h.  */

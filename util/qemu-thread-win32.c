@@ -56,14 +56,14 @@ void qemu_mutex_destroy(QemuMutex *mutex)
     InitializeSRWLock(&mutex->lock);
 }
 
-void qemu_mutex_lock(QemuMutex *mutex)
+void do_qemu_mutex_lock(QemuMutex *mutex)
 {
     assert(mutex->initialized);
     AcquireSRWLockExclusive(&mutex->lock);
     trace_qemu_mutex_locked(mutex);
 }
 
-int qemu_mutex_trylock(QemuMutex *mutex)
+int do_qemu_mutex_trylock(QemuMutex *mutex)
 {
     int owned;
 
