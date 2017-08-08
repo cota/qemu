@@ -17,13 +17,30 @@ typedef struct QemuThread QemuThread;
 #include "qemu/thread-posix.h"
 #endif
 
+/* include QSP header once QemuMutex, QemuCond etc. are defined */
+#include "qemu/qsp.h"
+
 #define QEMU_THREAD_JOINABLE 0
 #define QEMU_THREAD_DETACHED 1
 
+#ifdef CONFIG_SYNC_PROFILER
+# define qemu_mutex_lock(m)        qsp_mutex_lock(m, __FILE__, __LINE__)
+# define qemu_mutex_trylock(m)     qsp_mutex_trylock(m, __FILE__, __LINE__)
+# define qemu_rec_mutex_lock(m)    qsp_rec_mutex_lock(m, __FILE__, __LINE__)
+# define qemu_rec_mutex_trylock(m) qsp_rec_mutex_trylock(m, __FILE__, __LINE__)
+# define qemu_cond_wait(c, m)      qsp_cond_wait(c, m, __FILE__, __LINE__)
+#else
+# define qemu_mutex_lock(m)        qemu_mutex_lock__raw(m)
+# define qemu_mutex_trylock(m)     qemu_mutex_trylock__raw(m)
+# define qemu_cond_wait(c, m)      qemu_cond_wait__raw(c, m)
+# define qemu_rec_mutex_lock(m)    qemu_rec_mutex_lock__raw(m)
+# define qemu_rec_mutex_trylock(m) qemu_rec_mutex_trylock__raw(m)
+#endif /* !CONFIG_SYNC_PROFILER */
+
 void qemu_mutex_init(QemuMutex *mutex);
 void qemu_mutex_destroy(QemuMutex *mutex);
-void qemu_mutex_lock(QemuMutex *mutex);
-int qemu_mutex_trylock(QemuMutex *mutex);
+void qemu_mutex_lock__raw(QemuMutex *mutex);
+int qemu_mutex_trylock__raw(QemuMutex *mutex);
 void qemu_mutex_unlock(QemuMutex *mutex);
 
 /* Prototypes for other functions are in thread-posix.h/thread-win32.h.  */
@@ -39,7 +56,7 @@ void qemu_cond_destroy(QemuCond *cond);
  */
 void qemu_cond_signal(QemuCond *cond);
 void qemu_cond_broadcast(QemuCond *cond);
-void qemu_cond_wait(QemuCond *cond, QemuMutex *mutex);
+void qemu_cond_wait__raw(QemuCond *cond, QemuMutex *mutex);
 
 void qemu_sem_init(QemuSemaphore *sem, int init);
 void qemu_sem_post(QemuSemaphore *sem);
