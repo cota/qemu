@@ -16,6 +16,9 @@ typedef struct QemuThread QemuThread;
 #include "qemu/thread-posix.h"
 #endif
 
+/* include QSP header once QemuMutex, QemuCond etc. are defined */
+#include "qemu/qsp.h"
+
 #define QEMU_THREAD_JOINABLE 0
 #define QEMU_THREAD_DETACHED 1
 
@@ -25,7 +28,13 @@ int qemu_mutex_trylock_impl(QemuMutex *mutex, const char *file, const int line);
 void qemu_mutex_lock_impl(QemuMutex *mutex, const char *file, const int line);
 void qemu_mutex_unlock_impl(QemuMutex *mutex, const char *file, const int line);
 
-#define qemu_mutex_lock(mutex) \
+#ifdef CONFIG_SYNC_PROFILER
+# define qemu_mutex_lock(m)        qsp_mutex_lock(m, __FILE__, __LINE__)
+# define qemu_rec_mutex_lock(m)    qsp_rec_mutex_lock(m, __FILE__, __LINE__)
+# define qemu_mutex_trylock(m)     qsp_mutex_trylock(m, __FILE__, __LINE__)
+# define qemu_rec_mutex_trylock(m) qsp_rec_mutex_trylock(m, __FILE__, __LINE__)
+#else
+#define qemu_mutex_lock(mutex)                          \
         qemu_mutex_lock_impl(mutex, __FILE__, __LINE__)
 #define qemu_rec_mutex_lock(mutex) \
         qemu_rec_mutex_lock_impl(mutex, __FILE__, __LINE__)
@@ -33,6 +42,8 @@ void qemu_mutex_unlock_impl(QemuMutex *mutex, const char *file, const int line);
         qemu_mutex_trylock_impl(mutex, __FILE__, __LINE__)
 #define qemu_rec_mutex_trylock(mutex) \
         qemu_rec_mutex_trylock_impl(mutex, __FILE__, __LINE__)
+#endif /* !CONFIG_SYNC_PROFILER */
+
 #define qemu_mutex_unlock(mutex) \
         qemu_mutex_unlock_impl(mutex, __FILE__, __LINE__)
 #define qemu_rec_mutex_unlock(mutex) \
@@ -69,8 +80,12 @@ void qemu_cond_broadcast(QemuCond *cond);
 void qemu_cond_wait_impl(QemuCond *cond, QemuMutex *mutex,
                          const char *file, const int line);
 
-#define qemu_cond_wait(cond, mutex) \
+#ifdef CONFIG_SYNC_PROFILER
+# define qemu_cond_wait(c, m) qsp_cond_wait(c, m, __FILE__, __LINE__)
+#else
+#define qemu_cond_wait(cond, mutex)                             \
         qemu_cond_wait_impl(cond, mutex, __FILE__, __LINE__)
+#endif /* !CONFIG_SYNC_PROFILER */
 
 static inline void (qemu_cond_wait)(QemuCond *cond, QemuMutex *mutex)
 {
