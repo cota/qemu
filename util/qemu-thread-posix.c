@@ -57,7 +57,7 @@ void qemu_mutex_destroy(QemuMutex *mutex)
         error_exit(err, __func__);
 }
 
-void qemu_mutex_lock(QemuMutex *mutex)
+void qemu_mutex_lock__raw(QemuMutex *mutex)
 {
     int err;
 
@@ -69,7 +69,7 @@ void qemu_mutex_lock(QemuMutex *mutex)
     trace_qemu_mutex_locked(mutex);
 }
 
-int qemu_mutex_trylock(QemuMutex *mutex)
+int qemu_mutex_trylock__raw(QemuMutex *mutex)
 {
     int err;
 
@@ -152,7 +152,7 @@ void qemu_cond_broadcast(QemuCond *cond)
         error_exit(err, __func__);
 }
 
-void qemu_cond_wait(QemuCond *cond, QemuMutex *mutex)
+void qemu_cond_wait__raw(QemuCond *cond, QemuMutex *mutex)
 {
     int err;
 

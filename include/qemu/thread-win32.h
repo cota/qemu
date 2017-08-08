@@ -15,8 +15,8 @@ struct QemuRecMutex {
 };
 
 void qemu_rec_mutex_destroy(QemuRecMutex *mutex);
-void qemu_rec_mutex_lock(QemuRecMutex *mutex);
-int qemu_rec_mutex_trylock(QemuRecMutex *mutex);
+void qemu_rec_mutex_lock__raw(QemuRecMutex *mutex);
+int qemu_rec_mutex_trylock__raw(QemuRecMutex *mutex);
 void qemu_rec_mutex_unlock(QemuRecMutex *mutex);
 
 struct QemuCond {

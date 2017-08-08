@@ -56,14 +56,14 @@ void qemu_mutex_destroy(QemuMutex *mutex)
     InitializeSRWLock(&mutex->lock);
 }
 
-void qemu_mutex_lock(QemuMutex *mutex)
+void qemu_mutex_lock__raw(QemuMutex *mutex)
 {
     assert(mutex->initialized);
     AcquireSRWLockExclusive(&mutex->lock);
     trace_qemu_mutex_locked(mutex);
 }
 
-int qemu_mutex_trylock(QemuMutex *mutex)
+int qemu_mutex_trylock__raw(QemuMutex *mutex)
 {
     int owned;
 
@@ -96,13 +96,13 @@ void qemu_rec_mutex_destroy(QemuRecMutex *mutex)
     DeleteCriticalSection(&mutex->lock);
 }
 
-void qemu_rec_mutex_lock(QemuRecMutex *mutex)
+void qemu_rec_mutex_lock__raw(QemuRecMutex *mutex)
 {
     assert(mutex->initialized);
     EnterCriticalSection(&mutex->lock);
 }
 
-int qemu_rec_mutex_trylock(QemuRecMutex *mutex)
+int qemu_rec_mutex_trylock__raw(QemuRecMutex *mutex)
 {
     assert(mutex->initialized);
     return !TryEnterCriticalSection(&mutex->lock);
@@ -140,7 +140,7 @@ void qemu_cond_broadcast(QemuCond *cond)
     WakeAllConditionVariable(&cond->var);
 }
 
-void qemu_cond_wait(QemuCond *cond, QemuMutex *mutex)
+void qemu_cond_wait__raw(QemuCond *cond, QemuMutex *mutex)
 {
     assert(cond->initialized);
     trace_qemu_mutex_unlocked(mutex);
