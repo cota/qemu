@@ -70,6 +70,7 @@
 #include "qmp-commands.h"
 #include "hmp.h"
 #include "qemu/thread.h"
+#include "qemu/qlp.h"
 #include "block/qapi.h"
 #include "qapi/qmp-event.h"
 #include "qapi-event.h"
@@ -1116,6 +1117,11 @@ static void hmp_info_opcount(Monitor *mon, const QDict *qdict)
     dump_opcount_info((FILE *)mon, monitor_fprintf);
 }
 #endif
+
+static void hmp_info_lock(Monitor *mon, const QDict *qdict)
+{
+    qlp_report((FILE *)mon, monitor_fprintf);
+}
 
 static void hmp_info_history(Monitor *mon, const QDict *qdict)
 {

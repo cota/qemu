@@ -294,6 +294,20 @@ Show dynamic compiler opcode counters
 ETEXI
 
     {
+        .name       = "lock",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show lock profiling info",
+        .cmd        = hmp_info_lock,
+    },
+
+STEXI
+@item info lock
+@findex lock
+Show lock profiling info.
+ETEXI
+
+    {
         .name       = "kvm",
         .args_type  = "",
         .params     = "",
