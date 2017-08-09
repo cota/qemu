@@ -491,7 +491,7 @@ void s390_cpu_do_interrupt(CPUState *cs)
 
     /* we might still have pending interrupts, but not deliverable */
     if (!env->pending_int) {
-        cs->interrupt_request &= ~CPU_INTERRUPT_HARD;
+        cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD);
     }
 }
 
