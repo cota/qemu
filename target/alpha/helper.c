@@ -18,6 +18,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/main-loop.h"
 
 #include "cpu.h"
 #include "exec/exec-all.h"
@@ -420,7 +421,9 @@ bool alpha_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     if (idx >= 0) {
         cs->exception_index = idx;
         env->error_code = 0;
+        qemu_mutex_lock_iothread();
         alpha_cpu_do_interrupt(cs);
+        qemu_mutex_unlock_iothread();
         return true;
     }
     return false;
