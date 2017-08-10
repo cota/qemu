@@ -19,6 +19,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/main-loop.h"
 #include "cpu.h"
 #include "qemu/log.h"
 #include "exec/helper-proto.h"
@@ -1333,11 +1334,15 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 #if !defined(CONFIG_USER_ONLY)
     case CPU_INTERRUPT_POLL:
         cpu_reset_interrupt(cs, CPU_INTERRUPT_POLL);
+        qemu_mutex_lock_iothread();
         apic_poll_irq(cpu->apic_state);
+        qemu_mutex_unlock_iothread();
         break;
 #endif
     case CPU_INTERRUPT_SIPI:
+        qemu_mutex_lock_iothread();
         do_cpu_sipi(cpu);
+        qemu_mutex_unlock_iothread();
         break;
     case CPU_INTERRUPT_SMI:
         cpu_svm_check_intercept_param(env, SVM_EXIT_SMI, 0, 0);
