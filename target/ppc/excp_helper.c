@@ -22,6 +22,7 @@
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
+#include "qemu/main-loop.h"
 
 #include "helper_regs.h"
 
@@ -882,10 +883,12 @@ bool ppc_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     CPUPPCState *env = &cpu->env;
 
     if (interrupt_request & CPU_INTERRUPT_HARD) {
+        qemu_mutex_lock_iothread();
         ppc_hw_interrupt(env);
         if (env->pending_interrupts == 0) {
             cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD);
         }
+        qemu_mutex_unlock_iothread();
         return true;
     }
     return false;
