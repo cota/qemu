@@ -115,7 +115,7 @@ static void lm32_cpu_init_cfg_reg(LM32CPU *cpu)
 
 static bool lm32_cpu_has_work(CPUState *cs)
 {
-    return cs->interrupt_request & CPU_INTERRUPT_HARD;
+    return atomic_read(&cs->interrupt_request) & CPU_INTERRUPT_HARD;
 }
 
 /* CPUClass::reset() */

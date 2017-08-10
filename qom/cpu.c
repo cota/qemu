@@ -125,19 +125,9 @@ static void cpu_common_get_memory_mapping(CPUState *cpu,
     error_setg(errp, "Obtaining memory mappings is unsupported on this CPU.");
 }
 
-/* Resetting the IRQ comes from across the code base so we take the
- * BQL here if we need to.  cpu_interrupt assumes it is held.*/
 void cpu_reset_interrupt(CPUState *cpu, int mask)
 {
-    bool need_lock = !qemu_mutex_iothread_locked();
-
-    if (need_lock) {
-        qemu_mutex_lock_iothread();
-    }
-    cpu->interrupt_request &= ~mask;
-    if (need_lock) {
-        qemu_mutex_unlock_iothread();
-    }
+    atomic_and(&cpu->interrupt_request, ~mask);
 }
 
 void cpu_exit(CPUState *cpu)
@@ -292,7 +282,7 @@ static void cpu_common_reset(CPUState *cpu)
         log_cpu_state(cpu, cc->reset_dump_flags);
     }
 
-    cpu->interrupt_request = 0;
+    atomic_set(&cpu->interrupt_request, 0);
     cpu->halted = 0;
     cpu->mem_io_pc = 0;
     cpu->mem_io_vaddr = 0;
@@ -443,7 +433,7 @@ static vaddr cpu_adjust_watchpoint_address(CPUState *cpu, vaddr addr, int len)
 
 static void generic_handle_interrupt(CPUState *cpu, int mask)
 {
-    cpu->interrupt_request |= mask;
+    atomic_or(&cpu->interrupt_request, mask);
 
     if (!qemu_cpu_is_self(cpu)) {
         qemu_cpu_kick(cpu);

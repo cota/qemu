@@ -114,11 +114,11 @@ static inline int hreg_store_msr(CPUPPCState *env, target_ulong value,
     }
     if (((value >> MSR_IR) & 1) != msr_ir ||
         ((value >> MSR_DR) & 1) != msr_dr) {
-        cs->interrupt_request |= CPU_INTERRUPT_EXITTB;
+        atomic_or(&cs->interrupt_request, CPU_INTERRUPT_EXITTB);
     }
     if ((env->mmu_model & POWERPC_MMU_BOOKE) &&
         ((value >> MSR_GS) & 1) != msr_gs) {
-        cs->interrupt_request |= CPU_INTERRUPT_EXITTB;
+        atomic_or(&cs->interrupt_request,  CPU_INTERRUPT_EXITTB);
     }
     if (unlikely((env->flags & POWERPC_FLAG_TGPR) &&
                  ((value ^ env->msr) & (1 << MSR_TGPR)))) {

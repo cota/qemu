@@ -207,7 +207,7 @@ static inline void powerpc_excp(PowerPCCPU *cpu, int excp_model, int excp)
                         "Entering checkstop state\n");
             }
             cs->halted = 1;
-            cs->interrupt_request |= CPU_INTERRUPT_EXITTB;
+            atomic_or(&cs->interrupt_request, CPU_INTERRUPT_EXITTB);
         }
         if (env->msr_mask & MSR_HVB) {
             /* ISA specifies HV, but can be delivered to guest with HV clear
@@ -755,7 +755,8 @@ static void ppc_hw_interrupt(CPUPPCState *env)
 
     qemu_log_mask(CPU_LOG_INT, "%s: %p pending %08x req %08x me %d ee %d\n",
                   __func__, env, env->pending_interrupts,
-                  cs->interrupt_request, (int)msr_me, (int)msr_ee);
+                  atomic_read(&cs->interrupt_request),
+                  (int)msr_me, (int)msr_ee);
 #endif
     /* External reset */
     if (env->pending_interrupts & (1 << PPC_INTERRUPT_RESET)) {
@@ -940,7 +941,7 @@ void helper_store_msr(CPUPPCState *env, target_ulong val)
 
     if (excp != 0) {
         CPUState *cs = CPU(ppc_env_get_cpu(env));
-        cs->interrupt_request |= CPU_INTERRUPT_EXITTB;
+        atomic_or(&cs->interrupt_request, CPU_INTERRUPT_EXITTB);
         raise_exception(env, excp);
     }
 }
@@ -995,7 +996,7 @@ static inline void do_rfi(CPUPPCState *env, target_ulong nip, target_ulong msr)
     /* No need to raise an exception here,
      * as rfi is always the last insn of a TB
      */
-    cs->interrupt_request |= CPU_INTERRUPT_EXITTB;
+    atomic_or(&cs->interrupt_request, CPU_INTERRUPT_EXITTB);
 
     /* Reset the reservation */
     env->reserve_addr = -1;
