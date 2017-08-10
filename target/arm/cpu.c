@@ -20,6 +20,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
+#include "qemu/main-loop.h"
 #include "qapi/error.h"
 #include "cpu.h"
 #include "internals.h"
@@ -324,6 +325,7 @@ bool arm_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     uint32_t excp_idx;
     bool ret = false;
 
+    qemu_mutex_lock_iothread();
     if (interrupt_request & CPU_INTERRUPT_FIQ) {
         excp_idx = EXCP_FIQ;
         target_el = arm_phys_excp_target_el(cs, excp_idx, cur_el, secure);
@@ -365,6 +367,7 @@ bool arm_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         }
     }
 
+    qemu_mutex_unlock_iothread();
     return ret;
 }
 
@@ -375,6 +378,8 @@ static bool arm_v7m_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
     bool ret = false;
+
+    qemu_mutex_lock_iothread();
 
     /* ARMv7-M interrupt masking works differently than -A or -R.
      * There is no FIQ/IRQ distinction. Instead of I and F bits
@@ -389,6 +394,7 @@ static bool arm_v7m_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         cc->do_interrupt(cs);
         ret = true;
     }
+    qemu_mutex_unlock_iothread();
     return ret;
 }
 #endif
