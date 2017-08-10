@@ -2257,8 +2257,8 @@ void dump_opcount_info(FILE *f, fprintf_function cpu_fprintf)
 void cpu_interrupt(CPUState *cpu, int mask)
 {
     g_assert(qemu_mutex_iothread_locked());
-    cpu->interrupt_request |= mask;
-    cpu->icount_decr.u16.high = -1;
+    atomic_or(&cpu->interrupt_request, mask);
+    atomic_set(&cpu->icount_decr.u16.high, -1);
 }
 
 /*

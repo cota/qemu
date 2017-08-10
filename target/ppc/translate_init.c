@@ -8442,11 +8442,12 @@ static bool ppc_pvr_match_power7(PowerPCCPUClass *pcc, uint32_t pvr)
 
 static bool cpu_has_work_POWER7(CPUState *cs)
 {
+    uint32_t interrupt_request = atomic_read(&cs->interrupt_request);
     PowerPCCPU *cpu = POWERPC_CPU(cs);
     CPUPPCState *env = &cpu->env;
 
     if (cs->halted) {
-        if (!(cs->interrupt_request & CPU_INTERRUPT_HARD)) {
+        if (!(interrupt_request & CPU_INTERRUPT_HARD)) {
             return false;
         }
         if ((env->pending_interrupts & (1u << PPC_INTERRUPT_EXT)) &&
@@ -8470,7 +8471,7 @@ static bool cpu_has_work_POWER7(CPUState *cs)
         }
         return false;
     } else {
-        return msr_ee && (cs->interrupt_request & CPU_INTERRUPT_HARD);
+        return msr_ee && (interrupt_request & CPU_INTERRUPT_HARD);
     }
 }
 
@@ -8600,11 +8601,12 @@ static bool ppc_pvr_match_power8(PowerPCCPUClass *pcc, uint32_t pvr)
 
 static bool cpu_has_work_POWER8(CPUState *cs)
 {
+    uint32_t interrupt_request = atomic_read(&cs->interrupt_request);
     PowerPCCPU *cpu = POWERPC_CPU(cs);
     CPUPPCState *env = &cpu->env;
 
     if (cs->halted) {
-        if (!(cs->interrupt_request & CPU_INTERRUPT_HARD)) {
+        if (!(interrupt_request & CPU_INTERRUPT_HARD)) {
             return false;
         }
         if ((env->pending_interrupts & (1u << PPC_INTERRUPT_EXT)) &&
@@ -8636,7 +8638,7 @@ static bool cpu_has_work_POWER8(CPUState *cs)
         }
         return false;
     } else {
-        return msr_ee && (cs->interrupt_request & CPU_INTERRUPT_HARD);
+        return msr_ee && (interrupt_request & CPU_INTERRUPT_HARD);
     }
 }
 
@@ -8793,11 +8795,12 @@ static bool ppc_pvr_match_power9(PowerPCCPUClass *pcc, uint32_t pvr)
 
 static bool cpu_has_work_POWER9(CPUState *cs)
 {
+    uint32_t interrupt_request = atomic_read(&cs->interrupt_request);
     PowerPCCPU *cpu = POWERPC_CPU(cs);
     CPUPPCState *env = &cpu->env;
 
     if (cs->halted) {
-        if (!(cs->interrupt_request & CPU_INTERRUPT_HARD)) {
+        if (!(interrupt_request & CPU_INTERRUPT_HARD)) {
             return false;
         }
         /* External Exception */
@@ -8830,7 +8833,7 @@ static bool cpu_has_work_POWER9(CPUState *cs)
         }
         return false;
     } else {
-        return msr_ee && (cs->interrupt_request & CPU_INTERRUPT_HARD);
+        return msr_ee && (interrupt_request & CPU_INTERRUPT_HARD);
     }
 }
 
@@ -10342,7 +10345,7 @@ static bool ppc_cpu_has_work(CPUState *cs)
     PowerPCCPU *cpu = POWERPC_CPU(cs);
     CPUPPCState *env = &cpu->env;
 
-    return msr_ee && (cs->interrupt_request & CPU_INTERRUPT_HARD);
+    return msr_ee && (atomic_read(&cs->interrupt_request) & CPU_INTERRUPT_HARD);
 }
 
 /* CPUClass::reset() */
