@@ -200,6 +200,8 @@ extern bool have_avx2;
 # define TCG_AREG0 TCG_REG_EBP
 #endif
 
+#define TCG_TARGET_TLB_MAX_INDEX_BITS (32 - CPU_TLB_ENTRY_BITS)
+
 static inline void flush_icache_range(uintptr_t start, uintptr_t stop)
 {
 }
