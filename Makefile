@@ -602,8 +602,10 @@ ifneq (,$(findstring qemu-ga,$(TOOLS)))
 endif
 endif
 
+install-includedir:
+	$(INSTALL_DIR) "$(DESTDIR)$(includedir)"
 
-install: all $(if $(BUILD_DOCS),install-doc) install-datadir install-localstatedir
+install: all $(if $(BUILD_DOCS),install-doc) install-datadir install-localstatedir install-includedir
 ifneq ($(TOOLS),)
 	$(call install-prog,$(subst qemu-ga,qemu-ga$(EXESUF),$(TOOLS)),$(DESTDIR)$(bindir))
 endif
@@ -625,6 +627,9 @@ ifneq ($(BLOBS),)
 endif
 ifeq ($(CONFIG_GTK),y)
 	$(MAKE) -C po $@
+endif
+ifeq ($(CONFIG_PLUGINS),y)
+	$(INSTALL_DATA) $(SRC_PATH)/include/qemu/plugin-api.h "$(DESTDIR)$(includedir)/qemu-plugin.h"
 endif
 	$(INSTALL_DIR) "$(DESTDIR)$(qemu_datadir)/keymaps"
 	set -e; for x in $(KEYMAPS); do \
