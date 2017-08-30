@@ -32,6 +32,7 @@
 #include "hw/boards.h"
 #include "hw/qdev-properties.h"
 #include "trace-root.h"
+#include "qemu/plugin.h"
 
 CPUInterruptHandler cpu_interrupt_handler;
 
@@ -388,6 +389,7 @@ static void cpu_common_realizefn(DeviceState *dev, Error **errp)
 
     /* NOTE: latest generic point where the cpu is fully realized */
     trace_init_vcpu(cpu);
+    qemu_plugin_vcpu_init_hook(cpu);
 }
 
 static void cpu_common_unrealizefn(DeviceState *dev, Error **errp)
@@ -395,6 +397,7 @@ static void cpu_common_unrealizefn(DeviceState *dev, Error **errp)
     CPUState *cpu = CPU(dev);
     /* NOTE: latest generic point before the cpu is fully unrealized */
     trace_fini_vcpu(cpu);
+    qemu_plugin_vcpu_exit_hook(cpu);
     cpu_exec_unrealizefn(cpu);
 }
 

@@ -119,7 +119,7 @@ uint32_t do_qsp_callsite_hash(const struct qsp_callsite *callsite, uint64_t a)
     uint32_t e = callsite->line;
     uint32_t f = callsite->type;
 
-    return tb_hash_func7(a, b, e, f, 0);
+    return tb_hash_func8(a, b, e, f, 0, 0);
 }
 
 static inline

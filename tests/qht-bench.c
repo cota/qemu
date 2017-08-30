@@ -103,7 +103,7 @@ static bool is_equal(const void *ap, const void *bp)
 
 static inline uint32_t h(unsigned long v)
 {
-    return tb_hash_func7(v, 0, 0, 0, 0);
+    return tb_hash_func8(v, 0, 0, 0, 0, 0);
 }
 
 /*
