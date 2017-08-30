@@ -30,6 +30,7 @@ TMPO="${TMPDIR1}/${TMPB}.o"
 TMPCXX="${TMPDIR1}/${TMPB}.cxx"
 TMPE="${TMPDIR1}/${TMPB}.exe"
 TMPMO="${TMPDIR1}/${TMPB}.mo"
+TMPTXT="${TMPDIR1}/${TMPB}.txt"
 
 rm -f config.log
 
@@ -404,6 +405,8 @@ tcmalloc="no"
 jemalloc="no"
 replication="yes"
 vxhs=""
+plugins="no"
+ld_dynamic_list="no"
 
 supported_cpu="no"
 supported_os="no"
@@ -1282,6 +1285,10 @@ for opt do
   ;;
   --enable-vxhs) vxhs="yes"
   ;;
+  --enable-plugins) plugins="yes"
+  ;;
+  --disable-plugins) plugins="no"
+  ;;
   *)
       echo "ERROR: unknown option $opt"
       echo "Try '$0 --help' for more information"
@@ -1442,6 +1449,8 @@ Advanced options (experts only):
                            xen pv domain builder
   --enable-debug-stack-usage
                            track the maximum stack usage of stacks created by qemu_alloc_stack
+  --enable-plugins
+                           enable plugins via shared library loading
 
 Optional features, enabled with --enable-FEATURE and
 disabled with --disable-FEATURE, default is enabled if available:
@@ -4745,6 +4754,42 @@ if compile_prog "" "" ; then
   atomic64=yes
 fi
 
+#########################################
+# See if --dynamic-list is supported by the linker
+
+cat > $TMPTXT <<EOF
+{
+  foo;
+};
+EOF
+
+cat > $TMPC <<EOF
+#include <stdio.h>
+void foo(void);
+
+void foo(void)
+{
+  printf("foo\n");
+}
+
+int main(void)
+{
+  foo();
+  return 0;
+}
+EOF
+
+if compile_prog "" "-Wl,--dynamic-list=$TMPTXT" ; then
+  ld_dynamic_list="yes"
+else
+  if test "$plugins" = "yes" ; then
+    error_exit \
+        "Plugin support requires specifying a set of symbols that " \
+        "are exported to plugins. Unfortunately your linker doesn't " \
+        "support the flag (--dynamic-list) used for this purpose."
+  fi
+fi
+
 ########################################
 # check if getauxval is available.
 
@@ -5388,6 +5433,7 @@ echo "jemalloc support  $jemalloc"
 echo "avx2 optimization $avx2_opt"
 echo "replication support $replication"
 echo "VxHS block device $vxhs"
+echo "plugin support    $plugins"
 
 if test "$sdl_too_old" = "yes"; then
 echo "-> Your SDL version is too old - please upgrade to have SDL support"
@@ -6051,6 +6097,12 @@ fi
 if test "$vxhs" = "yes" ; then
   echo "CONFIG_VXHS=y" >> $config_host_mak
   echo "VXHS_LIBS=$vxhs_libs" >> $config_host_mak
+fi
+
+if test "$plugins" = "yes" ; then
+    echo "CONFIG_PLUGINS=y" >> $config_host_mak
+    LIBS="-ldl $LIBS"
+    LDFLAGS="-Wl,--dynamic-list=\$(SRC_PATH)/qemu-plugins.symbols $LDFLAGS"
 fi
 
 if test "$tcg_interpreter" = "yes"; then
