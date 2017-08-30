@@ -84,6 +84,7 @@ endif
 #######################################################################
 # Target-independent parts used in system and user emulation
 common-obj-y += cpus-common.o
+common-obj-$(CONFIG_PLUGINS) += plugin.o
 common-obj-y += hw/
 common-obj-y += qom/
 common-obj-y += disas/

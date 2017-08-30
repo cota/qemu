@@ -27,6 +27,7 @@
 #include "qemu/bitmap.h"
 #include "qemu/queue.h"
 #include "qemu/thread.h"
+#include "qemu/plugin.h"
 
 typedef int (*WriteCoreDumpFunction)(const void *buf, size_t size,
                                      void *opaque);
@@ -305,6 +306,7 @@ struct qemu_work_item;
  * @trace_dstate_delayed: Delayed changes to trace_dstate (includes all changes
  *                        to @trace_dstate).
  * @trace_dstate: Dynamic tracing state of events for this vCPU (bitmask).
+ * @plugin_mask: Plugin event bitmap. Modified only via async work.
  *
  * State of one CPU core or thread.
  */
@@ -376,6 +378,8 @@ struct CPUState {
     /* Used for events with 'vcpu' and *without* the 'disabled' properties */
     DECLARE_BITMAP(trace_dstate_delayed, CPU_TRACE_DSTATE_MAX_EVENTS);
     DECLARE_BITMAP(trace_dstate, CPU_TRACE_DSTATE_MAX_EVENTS);
+
+    DECLARE_BITMAP(plugin_mask, QEMU_PLUGIN_EV_MAX);
 
     /* TODO Move common fields from CPUArchState here. */
     int cpu_index; /* used by alpha TCG */

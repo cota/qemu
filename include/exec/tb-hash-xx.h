@@ -49,7 +49,8 @@
  * contiguous in memory.
  */
 static inline uint32_t
-tb_hash_func7(uint64_t a0, uint64_t b0, uint32_t e, uint32_t f, uint32_t g)
+tb_hash_func8(uint64_t a0, uint64_t b0, uint32_t e, uint32_t f, uint32_t g,
+              uint32_t h)
 {
     uint32_t v1 = TB_HASH_XX_SEED + PRIME32_1 + PRIME32_2;
     uint32_t v2 = TB_HASH_XX_SEED + PRIME32_2;
@@ -77,17 +78,24 @@ tb_hash_func7(uint64_t a0, uint64_t b0, uint32_t e, uint32_t f, uint32_t g)
     v4 = rol32(v4, 13);
     v4 *= PRIME32_1;
 
+    v1 += e * PRIME32_2;
+    v1 = rol32(v1, 13);
+    v1 *= PRIME32_1;
+
+    v2 += f * PRIME32_2;
+    v2 = rol32(v2, 13);
+    v2 *= PRIME32_1;
+
+    v3 += g * PRIME32_2;
+    v3 = rol32(v3, 13);
+    v3 *= PRIME32_1;
+
+    v4 += h * PRIME32_2;
+    v4 = rol32(v4, 13);
+    v4 *= PRIME32_1;
+
     h32 = rol32(v1, 1) + rol32(v2, 7) + rol32(v3, 12) + rol32(v4, 18);
-    h32 += 28;
-
-    h32 += e * PRIME32_3;
-    h32  = rol32(h32, 17) * PRIME32_4;
-
-    h32 += f * PRIME32_3;
-    h32  = rol32(h32, 17) * PRIME32_4;
-
-    h32 += g * PRIME32_3;
-    h32  = rol32(h32, 17) * PRIME32_4;
+    h32 += 32;
 
     h32 ^= h32 >> 15;
     h32 *= PRIME32_2;
