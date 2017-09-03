@@ -1576,7 +1576,6 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->flags = flags;
     tb->cflags = cflags;
     tb->trace_vcpu_dstate = *cpu->trace_dstate;
-    tcg_ctx->tb_cflags = cflags;
 
 #ifdef CONFIG_PROFILER
     /* includes aborted translations because of exceptions */
@@ -1586,9 +1585,11 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 
     tcg_func_start(tcg_ctx);
 
+    tcg_ctx->tb = tb;
     tcg_ctx->cpu = ENV_GET_CPU(env);
     gen_intermediate_code(cpu, tb);
     tcg_ctx->cpu = NULL;
+    tcg_ctx->tb = NULL;
 
     trace_translate_block(tb, tb->pc, tb->tc.ptr);
 

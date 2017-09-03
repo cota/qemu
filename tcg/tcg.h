@@ -634,7 +634,7 @@ struct TCGContext {
     uintptr_t *tb_jmp_target_addr; /* tb->jmp_target_arg if !direct_jump */
 
     TCGRegSet reserved_regs;
-    uint32_t tb_cflags; /* cflags of the current TB */
+    const TranslationBlock *tb;
     intptr_t current_frame_offset;
     intptr_t frame_start;
     intptr_t frame_end;
