@@ -11172,11 +11172,14 @@ static void disas_data_proc_simd_fp(DisasContext *s, uint32_t insn)
 }
 
 /* C3.1 A64 instruction index by encoding */
-static void disas_a64_insn(CPUARMState *env, DisasContext *s)
+static void disas_a64_insn(CPUARMState *env, DisasContext *s, struct qemu_insn *q_insn)
 {
     uint32_t insn;
 
     insn = arm_ldl_code(env, s->pc, s->sctlr_b);
+    if (q_insn) {
+        qemu_insn_append(q_insn, &insn, sizeof(insn));
+    }
     s->insn = insn;
     s->pc += 4;
 
@@ -11321,7 +11324,8 @@ static bool aarch64_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cpu,
     return true;
 }
 
-static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
+                                      struct qemu_insn *insn)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
     CPUARMState *env = cpu->env_ptr;
@@ -11342,7 +11346,7 @@ static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
                       default_exception_el(dc));
         dc->base.is_jmp = DISAS_NORETURN;
     } else {
-        disas_a64_insn(env, dc);
+        disas_a64_insn(env, dc, insn);
     }
 
     dc->base.pc_next = dc->pc;

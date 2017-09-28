@@ -53,6 +53,7 @@ static inline int qemu_plugin_load_list(struct qemu_plugin_list *head)
 enum qemu_plugin_event {
     QEMU_PLUGIN_EV_VCPU_INIT,
     QEMU_PLUGIN_EV_VCPU_EXIT,
+    QEMU_PLUGIN_EV_VCPU_INSN,
     QEMU_PLUGIN_EV_MAX,
 };
 

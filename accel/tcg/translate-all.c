@@ -1578,6 +1578,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->cflags = cflags;
     tb->trace_vcpu_dstate = *cpu->trace_dstate;
     tb->plugin_mask = *cpu->plugin_mask;
+    QSLIST_INIT(&tb->insn_list);
 
 #ifdef CONFIG_PROFILER
     /* includes aborted translations because of exceptions */

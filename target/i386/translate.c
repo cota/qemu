@@ -8503,7 +8503,8 @@ static bool i386_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cpu,
     }
 }
 
-static void i386_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+static void i386_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
+                                   struct qemu_insn *insn)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
     target_ulong pc_next = disas_insn(dc, cpu);

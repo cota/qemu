@@ -89,6 +89,13 @@ void qemu_plugin_register_vcpu_init_cb(qemu_plugin_id_t id,
 void qemu_plugin_register_vcpu_exit_cb(qemu_plugin_id_t id,
                                        qemu_plugin_vcpu_simple_cb_t cb);
 
+typedef void (*qemu_plugin_vcpu_insn_cb_t)(qemu_plugin_id_t id,
+                                           unsigned int vcpu_index,
+                                           const void *insn, size_t size);
+
+void qemu_plugin_register_vcpu_insn_cb(qemu_plugin_id_t id,
+                                       qemu_plugin_vcpu_insn_cb_t cb);
+
 /**
  * qemu_plugin_vcpu_for_each - iterate over the existing vCPU
  * @id: plugin ID
@@ -101,5 +108,7 @@ void qemu_plugin_register_vcpu_exit_cb(qemu_plugin_id_t id,
  */
 void qemu_plugin_vcpu_for_each(qemu_plugin_id_t id,
                                qemu_plugin_vcpu_simple_cb_t cb);
+
+typedef void (*qemu_plugin_insn_cb_t)(qemu_plugin_id_t id, unsigned int vcpu_index, uint8_t *insn, size_t size);
 
 #endif /* QEMU_PLUGIN_API_H */

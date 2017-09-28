@@ -17,10 +17,16 @@
 #include "exec/cpu-common.h"
 #include <dlfcn.h>
 
+#include "cpu.h"
+#include "exec/helper-proto.h"
+#include "exec/exec-all.h"
+#include "qemu/plugin.h"
+
 struct qemu_plugin_cb {
     struct qemu_plugin_ctx *ctx;
     union {
         qemu_plugin_vcpu_simple_cb_t vcpu_simple_cb;
+        qemu_plugin_vcpu_insn_cb_t vcpu_insn_cb;
         void *func;
     };
     QLIST_ENTRY(qemu_plugin_cb) entry;
@@ -450,6 +456,12 @@ void qemu_plugin_register_vcpu_exit_cb(qemu_plugin_id_t id,
     plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_EXIT, cb);
 }
 
+void qemu_plugin_register_vcpu_insn_cb(qemu_plugin_id_t id, qemu_plugin_vcpu_insn_cb_t cb)
+{
+    printf("%s\n", __func__);
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_INSN, cb);
+}
+
 void qemu_plugin_vcpu_init_hook(CPUState *cpu)
 {
     bool success;
@@ -501,6 +513,19 @@ void qemu_plugin_vcpu_for_each(qemu_plugin_id_t id,
     args.cb = cb;
     g_hash_table_foreach(plugin.cpu_ht, plugin_vcpu_for_each, &args);
     plugin_unlock();
+}
+
+void helper_plugin_insn_cb(CPUArchState *env, void *ptr)
+{
+    CPUState *cpu = ENV_GET_CPU(env);
+    struct qemu_insn *insn = ptr;
+    struct qemu_plugin_cb *cb, *next;
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_INSN], entry, next) {
+        qemu_plugin_vcpu_insn_cb_t func = cb->vcpu_insn_cb;
+
+        func(cb->ctx->id, cpu->cpu_index, insn->data, insn->size);
+    }
 }
 
 static void __attribute__((__constructor__)) plugin_init(void)

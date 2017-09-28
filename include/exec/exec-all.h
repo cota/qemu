@@ -304,6 +304,20 @@ static inline void tb_invalidate_phys_addr(AddressSpace *as, hwaddr addr)
 #define CODE_GEN_AVG_BLOCK_SIZE 150
 #endif
 
+struct qemu_insn {
+    QSLIST_ENTRY(qemu_insn) entry;
+    void *data;
+    size_t size;
+};
+
+static inline void qemu_insn_append(struct qemu_insn *insn, const void *from,
+                                    size_t size)
+{
+    insn->data = g_realloc(insn->data, insn->size + size);
+    memcpy(insn->data + insn->size, from, size);
+    insn->size += size;
+}
+
 /*
  * Translation Cache-related fields of a TB.
  * This struct exists just for convenience; we keep track of TB's in a binary
@@ -383,6 +397,7 @@ struct TranslationBlock {
     uintptr_t jmp_list_head;
     uintptr_t jmp_list_next[2];
     uintptr_t jmp_dest[2];
+    QSLIST_HEAD(, qemu_insn) insn_list;
 };
 
 extern bool parallel_cpus;

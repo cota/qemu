@@ -17,6 +17,7 @@
 #include "exec/gen-icount.h"
 #include "exec/log.h"
 #include "exec/translator.h"
+#include "qemu/plugin.h"
 
 /* Pairs with tcg_clear_temp_count.
    To be called by #TranslatorOps.{translate_insn,tb_stop} if
@@ -31,10 +32,22 @@ void translator_loop_temp_check(DisasContextBase *db)
     }
 }
 
+static void gen_insn_cb(CPUState *cpu, struct qemu_insn *insn)
+{
+#ifdef CONFIG_PLUGINS
+    TCGv_ptr ptr = tcg_const_ptr(insn);
+
+    gen_helper_plugin_insn_cb(cpu_env, ptr);
+    tcg_temp_free_ptr(ptr);
+#endif
+}
+
 void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
                      CPUState *cpu, TranslationBlock *tb)
 {
+    struct qemu_insn *prev_insn;
     int max_insns;
+    bool insn_cb;
 
     /* Initialize DisasContext */
     db->tb = tb;
@@ -67,7 +80,20 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
     ops->tb_start(db, cpu);
     tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
+    {
+        /* tb->plugin_mask is a u32 */
+        unsigned long mask = tb->plugin_mask;
+
+        insn_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_INSN, &mask);
+    }
+    prev_insn = NULL;
+
     while (true) {
+        struct qemu_insn *insn = insn_cb ? g_new0(struct qemu_insn, 1) : NULL;
+
+        if (insn_cb) {
+            gen_insn_cb(cpu, insn);
+        }
         db->num_insns++;
         ops->insn_start(db, cpu);
         tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
@@ -98,10 +124,24 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         if (db->num_insns == max_insns && (tb_cflags(db->tb) & CF_LAST_IO)) {
             /* Accept I/O on the last instruction.  */
             gen_io_start();
-            ops->translate_insn(db, cpu);
+            ops->translate_insn(db, cpu, insn);
             gen_io_end();
         } else {
-            ops->translate_insn(db, cpu);
+            ops->translate_insn(db, cpu, insn);
+        }
+
+        if (insn_cb) {
+            if (insn->size == 0) {
+                g_assert(db->is_jmp != DISAS_NEXT);
+                g_free(insn);
+            } else {
+                if (prev_insn == NULL) {
+                    QSLIST_INSERT_HEAD(&tb->insn_list, insn, entry);
+                } else {
+                    QSLIST_INSERT_AFTER(prev_insn, insn, entry);
+                    prev_insn = insn;
+                }
+            }
         }
 
         /* Stop translation if translate_insn so indicated.  */
