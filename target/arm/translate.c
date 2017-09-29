@@ -9744,7 +9744,7 @@ gen_thumb2_data_op(DisasContext *s, int op, int conds, uint32_t shifter_out,
 
 /* Translate a 32-bit thumb instruction.  Returns nonzero if the instruction
    is not legal.  */
-static int disas_thumb2_insn(DisasContext *s, uint32_t insn)
+static int disas_thumb2_insn(DisasContext *s, uint32_t insn, struct qemu_insn *q_insn)
 {
     uint32_t imm, shift, offset;
     uint32_t rd, rn, rm, rs;
@@ -11096,7 +11096,7 @@ illegal_op:
     return 1;
 }
 
-static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+static void disas_thumb_insn(DisasContext *s, uint32_t insn, struct qemu_insn *q_insn)
 {
     uint32_t val, op, rm, rn, rd, shift, cond;
     int32_t offset;
@@ -12114,7 +12114,8 @@ static void arm_post_translate_insn(DisasContext *dc)
     translator_loop_temp_check(&dc->base);
 }
 
-static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu, struct qemu_insn *q_insn)
+static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
+                                  struct qemu_insn *q_insn)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
     CPUARMState *env = cpu->env_ptr;
@@ -12125,6 +12126,9 @@ static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu, struc
     }
 
     insn = arm_ldl_code(env, dc->pc, dc->sctlr_b);
+    if (q_insn) {
+        qemu_insn_append(q_insn, &insn, sizeof(insn));
+    }
     dc->pc += 4;
     disas_arm_insn(dc, insn);
 
@@ -12195,11 +12199,17 @@ static void thumb_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
     insn = arm_lduw_code(env, dc->pc, dc->sctlr_b);
     is_16bit = thumb_insn_is_16bit(dc, insn);
     dc->pc += 2;
+    if (q_insn) {
+        qemu_insn_append(q_insn, &insn, 2);
+    }
     if (!is_16bit) {
         uint32_t insn2 = arm_lduw_code(env, dc->pc, dc->sctlr_b);
 
         insn = insn << 16 | insn2;
         dc->pc += 2;
+        if (q_insn) {
+            qemu_insn_append(q_insn, &insn, 2);
+        }
     }
 
     if (dc->condexec_mask && !thumb_insn_is_unconditional(dc, insn)) {
@@ -12213,9 +12223,9 @@ static void thumb_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
     }
 
     if (is_16bit) {
-        disas_thumb_insn(dc, insn);
+        disas_thumb_insn(dc, insn, q_insn);
     } else {
-        disas_thumb2_insn(dc, insn);
+        disas_thumb2_insn(dc, insn, q_insn);
     }
 
     /* Advance the Thumb condexec condition.  */
