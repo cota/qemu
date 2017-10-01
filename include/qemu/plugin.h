@@ -54,13 +54,26 @@ enum qemu_plugin_event {
     QEMU_PLUGIN_EV_VCPU_INIT,
     QEMU_PLUGIN_EV_VCPU_EXIT,
     QEMU_PLUGIN_EV_VCPU_INSN,
+    QEMU_PLUGIN_EV_VCPU_TB_TRANS_PRE,
+    QEMU_PLUGIN_EV_VCPU_TB_TRANS_POST,
     QEMU_PLUGIN_EV_MAX,
+};
+
+struct qemu_plugin_insn {
+    const void *data;
+    size_t size;
+};
+
+struct qemu_plugin_tb {
+    struct qemu_plugin_insn *insns;
+    size_t n;
 };
 
 #ifdef CONFIG_PLUGINS
 
 void qemu_plugin_vcpu_init_hook(CPUState *cpu);
 void qemu_plugin_vcpu_exit_hook(CPUState *cpu);
+void plugin_tb_post_cb(CPUState *cpu, struct qemu_plugin_tb *qtb);
 
 #else /* !CONFIG_PLUGINS */
 
@@ -68,6 +81,9 @@ static inline void qemu_plugin_vcpu_init_hook(CPUState *cpu)
 { }
 
 static inline void qemu_plugin_vcpu_exit_hook(CPUState *cpu)
+{ }
+
+static inline void plugin_tb_post_cb(CPUState *cpu, struct qemu_plugin_tb *qtb)
 { }
 
 #endif /* !CONFIG_PLUGINS */

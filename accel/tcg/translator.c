@@ -42,12 +42,33 @@ static void gen_insn_cb(CPUState *cpu, struct qemu_insn *insn)
 #endif
 }
 
+static void gen_tb_post_cb(CPUState *cpu, TranslationBlock *tb, int n)
+{
+    struct qemu_insn *insn;
+    struct qemu_plugin_tb qtb;
+    int i = 0;
+
+    qtb.insns = g_new(struct qemu_plugin_insn, n);
+    qtb.n = n;
+
+    QSLIST_FOREACH(insn, &tb->insn_list, entry) {
+        qtb.insns[i].data = insn->data;
+        qtb.insns[i].size = insn->size;
+        i++;
+    }
+    plugin_tb_post_cb(cpu, &qtb);
+    g_free(qtb.insns);
+}
+
 void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
                      CPUState *cpu, TranslationBlock *tb)
 {
     struct qemu_insn *prev_insn;
     int max_insns;
+    int n_trans_insns = 0;
     bool insn_cb;
+    bool tb_pre_cb;
+    bool tb_post_cb;
 
     /* Initialize DisasContext */
     db->tb = tb;
@@ -85,11 +106,18 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         unsigned long mask = tb->plugin_mask;
 
         insn_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_INSN, &mask);
+        tb_pre_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_TB_TRANS_PRE, &mask);
+        tb_post_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_TB_TRANS_POST, &mask);
     }
     prev_insn = NULL;
 
+    if (tb_pre_cb) {
+        gen_helper_plugin_tb_pre_cb(tcg_ctx->tcg_env);
+    }
+
     while (true) {
-        struct qemu_insn *insn = insn_cb ? g_new0(struct qemu_insn, 1) : NULL;
+        struct qemu_insn *insn = insn_cb || tb_post_cb ?
+            g_new0(struct qemu_insn, 1) : NULL;
 
         if (insn_cb) {
             gen_insn_cb(cpu, insn);
@@ -130,11 +158,13 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
             ops->translate_insn(db, cpu, insn);
         }
 
-        if (insn_cb) {
+        if (insn) {
             if (insn->size == 0) {
                 g_assert(db->is_jmp != DISAS_NEXT);
                 g_free(insn);
+                insn = NULL;
             } else {
+                n_trans_insns++;
                 if (prev_insn == NULL) {
                     QSLIST_INSERT_HEAD(&tb->insn_list, insn, entry);
                 } else {
@@ -155,6 +185,10 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
             db->is_jmp = DISAS_TOO_MANY;
             break;
         }
+    }
+
+    if (tb_post_cb) {
+        gen_tb_post_cb(cpu, tb, n_trans_insns);
     }
 
     /* Emit code to exit the TB, as indicated by db->is_jmp.  */

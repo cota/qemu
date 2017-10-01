@@ -27,6 +27,7 @@ struct qemu_plugin_cb {
     union {
         qemu_plugin_vcpu_simple_cb_t vcpu_simple_cb;
         qemu_plugin_vcpu_insn_cb_t vcpu_insn_cb;
+        qemu_plugin_vcpu_tb_trans_post_cb_t vcpu_tb_trans_post_cb;
         void *func;
     };
     QLIST_ENTRY(qemu_plugin_cb) entry;
@@ -458,7 +459,6 @@ void qemu_plugin_register_vcpu_exit_cb(qemu_plugin_id_t id,
 
 void qemu_plugin_register_vcpu_insn_cb(qemu_plugin_id_t id, qemu_plugin_vcpu_insn_cb_t cb)
 {
-    printf("%s\n", __func__);
     plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_INSN, cb);
 }
 
@@ -526,6 +526,64 @@ void helper_plugin_insn_cb(CPUArchState *env, void *ptr)
 
         func(cb->ctx->id, cpu->cpu_index, insn->data, insn->size);
     }
+}
+
+void helper_plugin_tb_pre_cb(CPUArchState *env)
+{
+    CPUState *cpu = ENV_GET_CPU(env);
+    struct qemu_plugin_cb *cb, *next;
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_TRANS_PRE], entry, next) {
+        qemu_plugin_vcpu_simple_cb_t func = cb->vcpu_simple_cb;
+
+        func(cb->ctx->id, cpu->cpu_index);
+    }
+}
+
+void plugin_tb_post_cb(CPUState *cpu, struct qemu_plugin_tb *qtb)
+{
+    struct qemu_plugin_cb *cb, *next;
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_TRANS_POST], entry, next) {
+        qemu_plugin_vcpu_tb_trans_post_cb_t func = cb->vcpu_tb_trans_post_cb;
+
+        func(cb->ctx->id, cpu->cpu_index, qtb);
+    }
+}
+
+void qemu_plugin_register_vcpu_tb_trans_pre_cb(qemu_plugin_id_t id,
+                                               qemu_plugin_vcpu_simple_cb_t cb)
+{
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_TRANS_PRE, cb);
+}
+
+void qemu_plugin_register_vcpu_tb_trans_post_cb(qemu_plugin_id_t id,
+                                                qemu_plugin_vcpu_tb_trans_post_cb_t cb)
+{
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_TRANS_POST, cb);
+}
+
+size_t qemu_plugin_tb_n_insns(const struct qemu_plugin_tb *tb)
+{
+    return tb->n;
+}
+
+const struct qemu_plugin_insn *qemu_plugin_tb_get_insn(const struct qemu_plugin_tb *tb, size_t idx)
+{
+    if (unlikely(idx >= tb->n)) {
+        return NULL;
+    }
+    return &tb->insns[idx];
+}
+
+const void *qemu_plugin_insn_data(const struct qemu_plugin_insn *insn)
+{
+    return insn->data;
+}
+
+size_t qemu_plugin_insn_size(const struct qemu_plugin_insn *insn)
+{
+    return insn->size;
 }
 
 static void __attribute__((__constructor__)) plugin_init(void)
