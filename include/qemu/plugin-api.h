@@ -96,17 +96,23 @@ typedef void (*qemu_plugin_vcpu_insn_cb_t)(qemu_plugin_id_t id,
 void qemu_plugin_register_vcpu_insn_cb(qemu_plugin_id_t id,
                                        qemu_plugin_vcpu_insn_cb_t cb);
 
-void qemu_plugin_register_vcpu_tb_trans_pre_cb(qemu_plugin_id_t id,
-                                               qemu_plugin_vcpu_simple_cb_t cb);
-
 struct qemu_plugin_tb;
 struct qemu_plugin_insn;
 
-typedef void (*qemu_plugin_vcpu_tb_trans_post_cb_t)(qemu_plugin_id_t id,
-                                                    unsigned int vcpu_index, const struct qemu_plugin_tb *tb);
+typedef void *(*qemu_plugin_vcpu_tb_trans_cb_t)(qemu_plugin_id_t id,
+                                                unsigned int vcpu_index,
+                                                const struct qemu_plugin_tb *tb);
 
-void qemu_plugin_register_vcpu_tb_trans_post_cb(qemu_plugin_id_t id,
-                                                qemu_plugin_vcpu_tb_trans_post_cb_t cb);
+void qemu_plugin_register_vcpu_tb_trans_cb(qemu_plugin_id_t id,
+                                           qemu_plugin_vcpu_tb_trans_cb_t cb);
+
+typedef void (*qemu_plugin_vcpu_tb_exec_cb_t)(qemu_plugin_id_t id,
+                                              unsigned int vcpu_index,
+                                              const struct qemu_plugin_tb *tb,
+                                              void *udata);
+
+void qemu_plugin_register_vcpu_tb_exec_cb(qemu_plugin_id_t id,
+                                          qemu_plugin_vcpu_tb_exec_cb_t cb);
 
 size_t qemu_plugin_tb_n_insns(const struct qemu_plugin_tb *tb);
 
@@ -115,8 +121,6 @@ const struct qemu_plugin_insn *qemu_plugin_tb_get_insn(const struct qemu_plugin_
 const void *qemu_plugin_insn_data(const struct qemu_plugin_insn *insn);
 
 size_t qemu_plugin_insn_size(const struct qemu_plugin_insn *insn);
-
-void qemu_plugin_gen_cb(qemu_plugin_id_t id, void *data);
 
 /**
  * qemu_plugin_vcpu_for_each - iterate over the existing vCPU

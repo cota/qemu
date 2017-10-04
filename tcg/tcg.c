@@ -380,24 +380,11 @@ void tcg_tb_insert(TranslationBlock *tb)
     qemu_mutex_unlock(&rt->lock);
 }
 
-void tcg_tb_remove_insn_list(TranslationBlock *tb)
+static gboolean tb_plugin_remove(gpointer k, gpointer v, gpointer d)
 {
-    struct qemu_insn *insn;
+    TranslationBlock *tb = v;
 
-    for (;;) {
-        insn = QSLIST_FIRST(&tb->insn_list);
-        if (insn == NULL) {
-            break;
-        }
-        QSLIST_REMOVE_HEAD(&tb->insn_list, entry);
-        g_free(insn->data);
-        g_free(insn);
-    }
-}
-
-static gboolean tb_remove_insn_list(gpointer k, gpointer v, gpointer d)
-{
-    tcg_tb_remove_insn_list(v);
+    qemu_plugin_tb_remove(tb->plugin_tb);
     return FALSE;
 }
 
@@ -409,7 +396,7 @@ void tcg_tb_remove(TranslationBlock *tb)
     g_tree_remove(rt->tree, &tb->tc);
     qemu_mutex_unlock(&rt->lock);
 
-    tcg_tb_remove_insn_list(tb);
+    qemu_plugin_tb_remove(tb->plugin_tb);
 }
 
 /*
@@ -487,8 +474,8 @@ static void tcg_region_tree_reset_all(void)
     for (i = 0; i < region.n; i++) {
         struct tcg_region_tree *rt = region_trees + i * tree_size;
 
-        /* remove all insn lists hanging from the TB */
-        g_tree_foreach(rt->tree, tb_remove_insn_list, NULL);
+        /* remove all plugin data from the TB */
+        g_tree_foreach(rt->tree, tb_plugin_remove, NULL);
 
         /* Increment the refcount first so that destroy acts as a reset */
         g_tree_ref(rt->tree);

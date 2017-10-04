@@ -32,43 +32,13 @@ void translator_loop_temp_check(DisasContextBase *db)
     }
 }
 
-static void gen_insn_cb(CPUState *cpu, struct qemu_insn *insn)
-{
-#ifdef CONFIG_PLUGINS
-    TCGv_ptr ptr = tcg_const_ptr(insn);
-
-    gen_helper_plugin_insn_cb(cpu_env, ptr);
-    tcg_temp_free_ptr(ptr);
-#endif
-}
-
-static void gen_tb_post_cb(CPUState *cpu, TranslationBlock *tb, int n)
-{
-    struct qemu_insn *insn;
-    struct qemu_plugin_tb qtb;
-    int i = 0;
-
-    qtb.insns = g_new(struct qemu_plugin_insn, n);
-    qtb.n = n;
-
-    QSLIST_FOREACH(insn, &tb->insn_list, entry) {
-        qtb.insns[i].data = insn->data;
-        qtb.insns[i].size = insn->size;
-        i++;
-    }
-    plugin_tb_post_cb(cpu, &qtb);
-    g_free(qtb.insns);
-}
-
 void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
                      CPUState *cpu, TranslationBlock *tb)
 {
-    struct qemu_insn *prev_insn;
     int max_insns;
-    int n_trans_insns = 0;
     bool insn_cb;
-    bool tb_pre_cb;
-    bool tb_post_cb;
+    bool tb_trans_cb;
+    bool tb_exec_cb;
 
     /* Initialize DisasContext */
     db->tb = tb;
@@ -106,22 +76,37 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         unsigned long mask = tb->plugin_mask;
 
         insn_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_INSN, &mask);
-        tb_pre_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_TB_TRANS_PRE, &mask);
-        tb_post_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_TB_TRANS_POST, &mask);
+        tb_trans_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_TB_TRANS, &mask);
+        tb_exec_cb = !!test_bit(QEMU_PLUGIN_EV_VCPU_TB_EXEC, &mask);
     }
-    prev_insn = NULL;
 
-    if (tb_pre_cb) {
-        gen_helper_plugin_tb_pre_cb(tcg_ctx->tcg_env);
+    if (insn_cb || tb_trans_cb || tb_exec_cb) {
+        tb->plugin_tb = g_new0(struct qemu_plugin_tb, 1);
+        QSLIST_INIT(&tb->plugin_tb->arg_list);
     }
+
+#ifdef CONFIG_PLUGINS
+    if (tb_exec_cb) {
+        TCGv_ptr ptr;
+
+        ptr = tcg_const_ptr(tb->plugin_tb);
+        gen_helper_plugin_tb_exec_cb(cpu_env, ptr);
+        tcg_temp_free_ptr(ptr);
+    }
+#endif
 
     while (true) {
-        struct qemu_insn *insn = insn_cb || tb_post_cb ?
-            g_new0(struct qemu_insn, 1) : NULL;
+        struct qemu_plugin_insn *insn = insn_cb || tb_trans_cb || tb_exec_cb ?
+            g_new0(struct qemu_plugin_insn, 1) : NULL;
 
+#ifdef CONFIG_PLUGINS
         if (insn_cb) {
-            gen_insn_cb(cpu, insn);
+            TCGv_ptr ptr = tcg_const_ptr(insn);
+
+            gen_helper_plugin_insn_cb(cpu_env, ptr);
+            tcg_temp_free_ptr(ptr);
         }
+#endif
         db->num_insns++;
         ops->insn_start(db, cpu);
         tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
@@ -159,19 +144,7 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         }
 
         if (insn) {
-            if (insn->size == 0) {
-                g_assert(db->is_jmp != DISAS_NEXT);
-                g_free(insn);
-                insn = NULL;
-            } else {
-                n_trans_insns++;
-                if (prev_insn == NULL) {
-                    QSLIST_INSERT_HEAD(&tb->insn_list, insn, entry);
-                } else {
-                    QSLIST_INSERT_AFTER(prev_insn, insn, entry);
-                    prev_insn = insn;
-                }
-            }
+            qemu_plugin_tb_append(tb->plugin_tb, insn);
         }
 
         /* Stop translation if translate_insn so indicated.  */
@@ -187,8 +160,8 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         }
     }
 
-    if (tb_post_cb) {
-        gen_tb_post_cb(cpu, tb, n_trans_insns);
+    if (tb_trans_cb) {
+        qemu_plugin_tb_trans_cb(cpu, tb->plugin_tb);
     }
 
     /* Emit code to exit the TB, as indicated by db->is_jmp.  */

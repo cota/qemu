@@ -11172,13 +11172,13 @@ static void disas_data_proc_simd_fp(DisasContext *s, uint32_t insn)
 }
 
 /* C3.1 A64 instruction index by encoding */
-static void disas_a64_insn(CPUARMState *env, DisasContext *s, struct qemu_insn *q_insn)
+static void disas_a64_insn(CPUARMState *env, DisasContext *s, struct qemu_plugin_insn *q_insn)
 {
     uint32_t insn;
 
     insn = arm_ldl_code(env, s->pc, s->sctlr_b);
     if (q_insn) {
-        qemu_insn_append(q_insn, &insn, sizeof(insn));
+        qemu_plugin_insn_append(q_insn, &insn, sizeof(insn));
     }
     s->insn = insn;
     s->pc += 4;
@@ -11325,7 +11325,7 @@ static bool aarch64_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cpu,
 }
 
 static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
-                                      struct qemu_insn *insn)
+                                      struct qemu_plugin_insn *insn)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
     CPUARMState *env = cpu->env_ptr;

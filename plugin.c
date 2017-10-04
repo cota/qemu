@@ -27,7 +27,8 @@ struct qemu_plugin_cb {
     union {
         qemu_plugin_vcpu_simple_cb_t vcpu_simple_cb;
         qemu_plugin_vcpu_insn_cb_t vcpu_insn_cb;
-        qemu_plugin_vcpu_tb_trans_post_cb_t vcpu_tb_trans_post_cb;
+        qemu_plugin_vcpu_tb_exec_cb_t vcpu_tb_exec_cb;
+        qemu_plugin_vcpu_tb_trans_cb_t vcpu_tb_trans_cb;
         void *func;
     };
     QLIST_ENTRY(qemu_plugin_cb) entry;
@@ -48,7 +49,7 @@ struct qemu_plugin_ctx {
 /* global state */
 struct qemu_plugin_state {
     QTAILQ_HEAD(, qemu_plugin_ctx) ctxs;
-    struct qemu_plugin_cb_head cb_lists[QEMU_PLUGIN_EV_MAX];
+    QLIST_HEAD(, qemu_plugin_cb) cb_lists[QEMU_PLUGIN_EV_MAX];
     /*
      * Use the HT as a hash map by inserting k == v, which saves memory as
      * documented by GLib. The parent struct is obtained with container_of().
@@ -518,7 +519,7 @@ void qemu_plugin_vcpu_for_each(qemu_plugin_id_t id,
 void helper_plugin_insn_cb(CPUArchState *env, void *ptr)
 {
     CPUState *cpu = ENV_GET_CPU(env);
-    struct qemu_insn *insn = ptr;
+    struct qemu_plugin_insn *insn = ptr;
     struct qemu_plugin_cb *cb, *next;
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_INSN], entry, next) {
@@ -528,39 +529,71 @@ void helper_plugin_insn_cb(CPUArchState *env, void *ptr)
     }
 }
 
-void helper_plugin_tb_pre_cb(CPUArchState *env)
+static void plugin_tb_exec_cb(CPUState *cpu, struct qemu_plugin_cb *cb, const struct qemu_plugin_tb *tb)
+{
+    qemu_plugin_vcpu_tb_exec_cb_t func = cb->vcpu_tb_exec_cb;
+    struct qemu_plugin_tb_arg *arg;
+    struct qemu_plugin_tb utb = {
+        .insns = tb->insns,
+        .n = tb->n,
+        /* keep .arg_list away from plugin code */
+    };
+
+    /* pass the context's TB's userdata; NULL otherwise */
+    QSLIST_FOREACH(arg, &tb->arg_list, entry) {
+        if (arg->id == cb->ctx->id) {
+            func(cb->ctx->id, cpu->cpu_index, &utb, arg->userp);
+            return;
+        }
+    }
+    func(cb->ctx->id, cpu->cpu_index, &utb, NULL);
+}
+
+void helper_plugin_tb_exec_cb(CPUArchState *env, void *ptr)
 {
     CPUState *cpu = ENV_GET_CPU(env);
+    const struct qemu_plugin_tb *tb = ptr;
     struct qemu_plugin_cb *cb, *next;
 
-    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_TRANS_PRE], entry, next) {
-        qemu_plugin_vcpu_simple_cb_t func = cb->vcpu_simple_cb;
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_EXEC], entry, next) {
 
-        func(cb->ctx->id, cpu->cpu_index);
+        plugin_tb_exec_cb(cpu, cb, tb);
     }
 }
 
-void plugin_tb_post_cb(CPUState *cpu, struct qemu_plugin_tb *qtb)
+void qemu_plugin_tb_trans_cb(CPUState *cpu, struct qemu_plugin_tb *tb)
 {
     struct qemu_plugin_cb *cb, *next;
 
-    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_TRANS_POST], entry, next) {
-        qemu_plugin_vcpu_tb_trans_post_cb_t func = cb->vcpu_tb_trans_post_cb;
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_TRANS], entry, next) {
+        qemu_plugin_vcpu_tb_trans_cb_t func = cb->vcpu_tb_trans_cb;
+        void *userp = NULL;
 
-        func(cb->ctx->id, cpu->cpu_index, qtb);
+        userp = func(cb->ctx->id, cpu->cpu_index, tb);
+        if (userp != NULL) {
+            struct qemu_plugin_tb_arg *a = g_new(struct qemu_plugin_tb_arg, 1);
+
+            a->userp = userp;
+            a->id = cb->ctx->id;
+            /*
+             * No need for a lock; the TB is not visible to other cpus yet, and
+             * the list is only modified when the TB is deleted
+             */
+            QSLIST_INSERT_HEAD(&tb->arg_list, a, entry);
+        }
     }
 }
 
-void qemu_plugin_register_vcpu_tb_trans_pre_cb(qemu_plugin_id_t id,
-                                               qemu_plugin_vcpu_simple_cb_t cb)
+void qemu_plugin_register_vcpu_tb_trans_cb(qemu_plugin_id_t id,
+                                           qemu_plugin_vcpu_tb_trans_cb_t cb)
 {
-    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_TRANS_PRE, cb);
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_TRANS, cb);
 }
 
-void qemu_plugin_register_vcpu_tb_trans_post_cb(qemu_plugin_id_t id,
-                                                qemu_plugin_vcpu_tb_trans_post_cb_t cb)
+void qemu_plugin_register_vcpu_tb_exec_cb(qemu_plugin_id_t id,
+                                          qemu_plugin_vcpu_tb_exec_cb_t cb)
 {
-    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_TRANS_POST, cb);
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_EXEC, cb);
 }
 
 size_t qemu_plugin_tb_n_insns(const struct qemu_plugin_tb *tb)
@@ -573,7 +606,7 @@ const struct qemu_plugin_insn *qemu_plugin_tb_get_insn(const struct qemu_plugin_
     if (unlikely(idx >= tb->n)) {
         return NULL;
     }
-    return &tb->insns[idx];
+    return tb->insns[idx];
 }
 
 const void *qemu_plugin_insn_data(const struct qemu_plugin_insn *insn)
@@ -584,6 +617,24 @@ const void *qemu_plugin_insn_data(const struct qemu_plugin_insn *insn)
 size_t qemu_plugin_insn_size(const struct qemu_plugin_insn *insn)
 {
     return insn->size;
+}
+
+void qemu_plugin_tb_remove(struct qemu_plugin_tb *tb)
+{
+    if (tb == NULL) {
+        return;
+    }
+    for (;;) {
+        struct qemu_plugin_tb_arg *arg = QSLIST_FIRST(&tb->arg_list);
+
+        if (arg == NULL) {
+            break;
+        }
+        QSLIST_REMOVE_HEAD(&tb->arg_list, entry);
+        g_free(arg);
+    }
+    g_free(tb->insns);
+    g_free(tb);
 }
 
 static void __attribute__((__constructor__)) plugin_init(void)

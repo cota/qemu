@@ -3,9 +3,10 @@
   qemu_plugin_register_vcpu_init_cb;
   qemu_plugin_register_vcpu_exit_cb;
   qemu_plugin_register_vcpu_insn_cb;
-  qemu_plugin_register_vcpu_tb_trans_pre_cb;
-  qemu_plugin_register_vcpu_tb_trans_post_cb;
+  qemu_plugin_register_vcpu_tb_trans_cb;
+  qemu_plugin_register_vcpu_tb_exec_cb;
   qemu_plugin_tb_n_insns;
+  qemu_plugin_tb_get_insn;
   qemu_plugin_insn_data;
   qemu_plugin_insn_size;
   qemu_plugin_vcpu_for_each;
