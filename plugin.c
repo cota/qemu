@@ -468,6 +468,7 @@ void qemu_plugin_vcpu_init_hook(CPUState *cpu)
     bool success;
 
     plugin_lock();
+    plugin_cpu_update(&cpu->cpu_index, NULL, NULL);
     success = g_hash_table_insert(plugin.cpu_ht, &cpu->cpu_index,
                                   &cpu->cpu_index);
     g_assert(success);
