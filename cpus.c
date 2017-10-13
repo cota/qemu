@@ -41,6 +41,7 @@
 #include "exec/exec-all.h"
 
 #include "qemu/thread.h"
+#include "qemu/plugin.h"
 #include "sysemu/cpus.h"
 #include "sysemu/qtest.h"
 #include "qemu/main-loop.h"
@@ -1830,6 +1831,8 @@ void qemu_init_vcpu(CPUState *cpu)
     cpu->nr_threads = smp_threads;
     cpu->stopped = true;
     qemu_cond_init(&cpu->cond);
+
+    qemu_plugin_vcpu_init_hook(cpu);
 
     if (!cpu->as) {
         /* If the target cpu hasn't set up any address spaces itself,

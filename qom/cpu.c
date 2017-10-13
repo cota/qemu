@@ -389,7 +389,6 @@ static void cpu_common_realizefn(DeviceState *dev, Error **errp)
 
     /* NOTE: latest generic point where the cpu is fully realized */
     trace_init_vcpu(cpu);
-    qemu_plugin_vcpu_init_hook(cpu);
 }
 
 static void cpu_common_unrealizefn(DeviceState *dev, Error **errp)
