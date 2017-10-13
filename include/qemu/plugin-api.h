@@ -135,6 +135,12 @@ size_t qemu_plugin_insn_size(const struct qemu_plugin_insn *insn);
 void qemu_plugin_vcpu_for_each(qemu_plugin_id_t id,
                                qemu_plugin_vcpu_simple_cb_t cb);
 
+/* returns -1 in user-mode */
+int qemu_plugin_n_vcpus(void);
+
+/* returns -1 in user-mode */
+int qemu_plugin_n_max_vcpus(void);
+
 typedef void (*qemu_plugin_insn_cb_t)(qemu_plugin_id_t id, unsigned int vcpu_index, uint8_t *insn, size_t size);
 
 #endif /* QEMU_PLUGIN_API_H */

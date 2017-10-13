@@ -21,6 +21,7 @@
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
 #include "qemu/plugin.h"
+#include "sysemu/sysemu.h"
 
 struct qemu_plugin_cb {
     struct qemu_plugin_ctx *ctx;
@@ -636,6 +637,24 @@ void qemu_plugin_tb_remove(struct qemu_plugin_tb *tb)
     }
     g_free(tb->insns);
     g_free(tb);
+}
+
+int qemu_plugin_n_vcpus(void)
+{
+#ifdef CONFIG_USER_ONLY
+    return -1;
+#else
+    return smp_cpus;
+#endif
+}
+
+int qemu_plugin_n_max_vcpus(void)
+{
+#ifdef CONFIG_USER_ONLY
+    return -1;
+#else
+    return max_cpus;
+#endif
 }
 
 static void __attribute__((__constructor__)) plugin_init(void)
