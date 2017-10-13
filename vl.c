@@ -4295,10 +4295,6 @@ int main(int argc, char **argv, char **envp)
     }
     trace_init_file(trace_file);
 
-    if (qemu_plugin_load_list(&plugin_list)) {
-        exit(1);
-    }
-
     /* Open the logfile at this point and set the log mask if necessary.
      */
     if (log_file) {
@@ -4354,6 +4350,11 @@ int main(int argc, char **argv, char **envp)
     if (machine_class->default_machine_opts) {
         qemu_opts_set_defaults(qemu_find_opts("machine"),
                                machine_class->default_machine_opts, 0);
+    }
+
+    /* process plugin before CPUs are created, but once -smp has been parsed */
+    if (qemu_plugin_load_list(&plugin_list)) {
+        exit(1);
     }
 
     qemu_opts_foreach(qemu_find_opts("device"),
