@@ -406,6 +406,8 @@ static void plugin_vcpu_cb__simple(CPUState *cpu, enum qemu_plugin_event ev)
     switch (ev) {
     case QEMU_PLUGIN_EV_VCPU_INIT:
     case QEMU_PLUGIN_EV_VCPU_EXIT:
+    case QEMU_PLUGIN_EV_VCPU_IDLE:
+    case QEMU_PLUGIN_EV_VCPU_RESUME:
         /* iterate safely; plugins might uninstall themselves at any time */
         QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
             qemu_plugin_vcpu_simple_cb_t func = cb->vcpu_simple_cb;
@@ -637,6 +639,28 @@ void qemu_plugin_tb_remove(struct qemu_plugin_tb *tb)
     }
     g_free(tb->insns);
     g_free(tb);
+}
+
+void qemu_plugin_vcpu_idle_cb(CPUState *cpu)
+{
+    plugin_vcpu_cb__simple(cpu, QEMU_PLUGIN_EV_VCPU_IDLE);
+}
+
+void qemu_plugin_vcpu_resume_cb(CPUState *cpu)
+{
+    plugin_vcpu_cb__simple(cpu, QEMU_PLUGIN_EV_VCPU_RESUME);
+}
+
+void qemu_plugin_register_vcpu_idle_cb(qemu_plugin_id_t id,
+                                       qemu_plugin_vcpu_simple_cb_t cb)
+{
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_IDLE, cb);
+}
+
+void qemu_plugin_register_vcpu_resume_cb(qemu_plugin_id_t id,
+                                         qemu_plugin_vcpu_simple_cb_t cb)
+{
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_RESUME, cb);
 }
 
 int qemu_plugin_n_vcpus(void)

@@ -89,6 +89,12 @@ void qemu_plugin_register_vcpu_init_cb(qemu_plugin_id_t id,
 void qemu_plugin_register_vcpu_exit_cb(qemu_plugin_id_t id,
                                        qemu_plugin_vcpu_simple_cb_t cb);
 
+void qemu_plugin_register_vcpu_idle_cb(qemu_plugin_id_t id,
+                                       qemu_plugin_vcpu_simple_cb_t cb);
+
+void qemu_plugin_register_vcpu_resume_cb(qemu_plugin_id_t id,
+                                         qemu_plugin_vcpu_simple_cb_t cb);
+
 typedef void (*qemu_plugin_vcpu_insn_cb_t)(qemu_plugin_id_t id,
                                            unsigned int vcpu_index,
                                            const void *insn, size_t size);

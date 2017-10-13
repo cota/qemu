@@ -1106,11 +1106,20 @@ static bool qemu_tcg_should_sleep(CPUState *cpu)
 
 static void qemu_tcg_wait_io_event(CPUState *cpu)
 {
+    bool asleep = false;
+
     g_assert(!mttcg_enabled || cpu_mutex_locked(cpu));
 
     while (qemu_tcg_should_sleep(cpu)) {
+        if (!asleep) {
+            asleep = true;
+            qemu_plugin_vcpu_idle_cb(cpu);
+        }
         stop_tcg_kick_timer();
         qemu_cond_wait(cpu->halt_cond, &cpu->lock);
+    }
+    if (asleep) {
+        qemu_plugin_vcpu_resume_cb(cpu);
     }
 
     start_tcg_kick_timer();

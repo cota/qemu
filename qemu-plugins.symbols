@@ -2,6 +2,8 @@
   qemu_plugin_uninstall;
   qemu_plugin_register_vcpu_init_cb;
   qemu_plugin_register_vcpu_exit_cb;
+  qemu_plugin_register_vcpu_idle_cb;
+  qemu_plugin_register_vcpu_resume_cb;
   qemu_plugin_register_vcpu_insn_cb;
   qemu_plugin_register_vcpu_tb_trans_cb;
   qemu_plugin_register_vcpu_tb_exec_cb;
