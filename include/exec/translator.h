@@ -116,6 +116,9 @@ typedef struct TranslatorOps {
     void (*translate_insn)(DisasContextBase *db, CPUState *cpu, struct qemu_plugin_insn *insn);
     void (*tb_stop)(DisasContextBase *db, CPUState *cpu);
     void (*disas_log)(const DisasContextBase *db, CPUState *cpu);
+    void (*ctx_copy)(void *to, const DisasContextBase *db);
+    void (*ctx_restore)(DisasContextBase *db, const void *from);
+    size_t ctx_size;
 } TranslatorOps;
 
 /**

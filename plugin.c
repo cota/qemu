@@ -533,6 +533,7 @@ void helper_plugin_insn_cb(CPUArchState *env, void *ptr)
     }
 }
 
+#if 0
 static void plugin_tb_exec_cb(CPUState *cpu, struct qemu_plugin_cb *cb, const struct qemu_plugin_tb *tb)
 {
     qemu_plugin_vcpu_tb_exec_cb_t func = cb->vcpu_tb_exec_cb;
@@ -564,6 +565,7 @@ void helper_plugin_tb_exec_cb(CPUArchState *env, void *ptr)
         plugin_tb_exec_cb(cpu, cb, tb);
     }
 }
+#endif
 
 void qemu_plugin_tb_trans_cb(CPUState *cpu, struct qemu_plugin_tb *tb)
 {
@@ -594,11 +596,13 @@ void qemu_plugin_register_vcpu_tb_trans_cb(qemu_plugin_id_t id,
     plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_TRANS, cb);
 }
 
+#if 0
 void qemu_plugin_register_vcpu_tb_exec_cb(qemu_plugin_id_t id,
                                           qemu_plugin_vcpu_tb_exec_cb_t cb)
 {
     plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_EXEC, cb);
 }
+#endif
 
 size_t qemu_plugin_tb_n_insns(const struct qemu_plugin_tb *tb)
 {

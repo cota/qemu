@@ -11433,6 +11433,20 @@ static void aarch64_tr_disas_log(const DisasContextBase *dcbase,
                      4 | (bswap_code(dc->sctlr_b) ? 2 : 0));
 }
 
+static void aarch64_tr_ctx_copy(void *to, const DisasContextBase *db)
+{
+    DisasContext *dc = container_of(db, DisasContext, base);
+    memcpy(to, dc, sizeof(*dc));
+}
+
+static void aarch64_tr_ctx_restore(DisasContextBase *db, const void *from)
+{
+    DisasContext *dc = container_of(db, DisasContext, base);
+    const DisasContext *saved_dc = from;
+
+    memcpy(dc, saved_dc, sizeof(*dc));
+}
+
 const TranslatorOps aarch64_translator_ops = {
     .init_disas_context = aarch64_tr_init_disas_context,
     .tb_start           = aarch64_tr_tb_start,
@@ -11441,4 +11455,7 @@ const TranslatorOps aarch64_translator_ops = {
     .translate_insn     = aarch64_tr_translate_insn,
     .tb_stop            = aarch64_tr_tb_stop,
     .disas_log          = aarch64_tr_disas_log,
+    .ctx_copy           = aarch64_tr_ctx_copy,
+    .ctx_restore        = aarch64_tr_ctx_restore,
+    .ctx_size           = sizeof(DisasContext),
 };
