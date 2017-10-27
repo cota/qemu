@@ -109,8 +109,15 @@ void superh_cpu_do_interrupt(CPUState *cs)
     env->in_sleep = 0;
 
     if (do_irq) {
+        bool locked = qemu_mutex_iothread_locked();
+        if (!locked) {
+            qemu_mutex_lock_iothread();
+        }
         irq_vector = sh_intc_get_pending_vector(env->intc_handle,
 						(env->sr >> 4) & 0xf);
+        if (!locked) {
+            qemu_mutex_unlock_iothread();
+        }
         if (irq_vector == -1) {
             return; /* masked */
 	}

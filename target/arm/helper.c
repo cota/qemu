@@ -7465,7 +7465,7 @@ gen_invep:
     return false;
 }
 
-void arm_v7m_cpu_do_interrupt(CPUState *cs)
+static void arm_v7m_cpu_do_interrupt_locked(CPUState *cs)
 {
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
@@ -7648,6 +7648,17 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
     ignore_stackfaults = v7m_push_stack(cpu);
     v7m_exception_taken(cpu, lr, false, ignore_stackfaults);
     qemu_log_mask(CPU_LOG_INT, "... as %d\n", env->v7m.exception);
+}
+
+void arm_v7m_cpu_do_interrupt(CPUState *cs)
+{
+    if (qemu_mutex_iothread_locked()) {
+        arm_v7m_cpu_do_interrupt_locked(cs);
+    } else {
+        qemu_mutex_lock_iothread();
+        arm_v7m_cpu_do_interrupt_locked(cs);
+        qemu_mutex_unlock_iothread();
+    }
 }
 
 /* Function used to synchronize QEMU's AArch64 register set with AArch32
@@ -8223,7 +8234,13 @@ void arm_cpu_do_interrupt(CPUState *cs)
     }
 
     if (arm_is_psci_call(cpu, cs->exception_index)) {
-        arm_handle_psci_call(cpu);
+        if (!qemu_mutex_iothread_locked()) {
+            qemu_mutex_lock_iothread();
+            arm_handle_psci_call(cpu);
+            qemu_mutex_unlock_iothread();
+        } else {
+            arm_handle_psci_call(cpu);
+        }
         qemu_log_mask(CPU_LOG_INT, "...handled as PSCI call\n");
         return;
     }
@@ -8244,9 +8261,13 @@ void arm_cpu_do_interrupt(CPUState *cs)
     }
 
     /* Hooks may change global state so BQL should be held.  */
-    g_assert(qemu_mutex_iothread_locked());
-
-    arm_call_el_change_hook(cpu);
+    if (!qemu_mutex_iothread_locked()) {
+        qemu_mutex_lock_iothread();
+        arm_call_el_change_hook(cpu);
+        qemu_mutex_unlock_iothread();
+    } else {
+        arm_call_el_change_hook(cpu);
+    }
 
     if (!kvm_enabled()) {
         atomic_or(&cs->interrupt_request, CPU_INTERRUPT_EXITTB);

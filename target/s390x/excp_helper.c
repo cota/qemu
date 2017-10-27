@@ -379,9 +379,15 @@ void s390_cpu_do_interrupt(CPUState *cs)
     S390CPU *cpu = S390_CPU(cs);
     CPUS390XState *env = &cpu->env;
     bool stopped = false;
+    bool locked;
 
     qemu_log_mask(CPU_LOG_INT, "%s: %d at pc=%" PRIx64 "\n",
                   __func__, cs->exception_index, env->psw.addr);
+
+    locked = qemu_mutex_iothread_locked();
+    if (!locked) {
+        qemu_mutex_lock_iothread();
+    }
 
 try_deliver:
     /* handle machine checks */
@@ -449,6 +455,10 @@ try_deliver:
     } else if (cs->halted) {
         /* unhalt if we had a WAIT PSW somehwere in our injection chain */
         s390_cpu_unhalt(cpu);
+    }
+
+    if (!locked) {
+        qemu_mutex_unlock_iothread();
     }
 }
 
