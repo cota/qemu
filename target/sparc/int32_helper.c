@@ -132,7 +132,14 @@ void sparc_cpu_do_interrupt(CPUState *cs)
 #if !defined(CONFIG_USER_ONLY)
     /* IRQ acknowledgment */
     if ((intno & ~15) == TT_EXTINT && env->qemu_irq_ack != NULL) {
+        bool locked = qemu_mutex_iothread_locked();
+        if (!locked) {
+            qemu_mutex_lock_iothread();
+        }
         env->qemu_irq_ack(env, env->irq_manager, intno);
+        if (!locked) {
+            qemu_mutex_unlock_iothread();
+        }
     }
 #endif
 }

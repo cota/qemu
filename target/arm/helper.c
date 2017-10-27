@@ -7766,7 +7766,13 @@ void arm_cpu_do_interrupt(CPUState *cs)
     }
 
     if (arm_is_psci_call(cpu, cs->exception_index)) {
-        arm_handle_psci_call(cpu);
+        if (!qemu_mutex_iothread_locked()) {
+            qemu_mutex_lock_iothread();
+            arm_handle_psci_call(cpu);
+            qemu_mutex_unlock_iothread();
+        } else {
+            arm_handle_psci_call(cpu);
+        }
         qemu_log_mask(CPU_LOG_INT, "...handled as PSCI call\n");
         return;
     }
@@ -7787,9 +7793,13 @@ void arm_cpu_do_interrupt(CPUState *cs)
     }
 
     /* Hooks may change global state so BQL should be held.  */
-    g_assert(qemu_mutex_iothread_locked());
-
-    arm_call_el_change_hook(cpu);
+    if (!qemu_mutex_iothread_locked()) {
+        qemu_mutex_lock_iothread();
+        arm_call_el_change_hook(cpu);
+        qemu_mutex_unlock_iothread();
+    } else {
+        arm_call_el_change_hook(cpu);
+    }
 
     if (!kvm_enabled()) {
         atomic_or(&cs->interrupt_request, CPU_INTERRUPT_EXITTB);

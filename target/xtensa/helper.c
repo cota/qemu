@@ -30,6 +30,7 @@
 #include "exec/exec-all.h"
 #include "exec/gdbstub.h"
 #include "qemu/host-utils.h"
+#include "qemu/main-loop.h"
 #if !defined(CONFIG_USER_ONLY)
 #include "hw/loader.h"
 #endif
@@ -200,6 +201,7 @@ void xtensa_cpu_do_interrupt(CPUState *cs)
 {
     XtensaCPU *cpu = XTENSA_CPU(cs);
     CPUXtensaState *env = &cpu->env;
+    bool locked;
 
     if (cs->exception_index == EXC_IRQ) {
         qemu_log_mask(CPU_LOG_INT,
@@ -247,7 +249,14 @@ void xtensa_cpu_do_interrupt(CPUState *cs)
                 __func__, env->pc, cs->exception_index);
         break;
     }
+    locked = qemu_mutex_iothread_locked();
+    if (!locked) {
+        qemu_mutex_lock_iothread();
+    }
     check_interrupts(env);
+    if (!locked) {
+        qemu_mutex_unlock_iothread();
+    }
 }
 
 bool xtensa_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
