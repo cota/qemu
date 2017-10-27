@@ -20,7 +20,6 @@
 
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
-#include "qemu/main-loop.h"
 #include "qapi/error.h"
 #include "cpu.h"
 #include "internals.h"
@@ -325,7 +324,6 @@ bool arm_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     uint32_t excp_idx;
     bool ret = false;
 
-    qemu_mutex_lock_iothread();
     if (interrupt_request & CPU_INTERRUPT_FIQ) {
         excp_idx = EXCP_FIQ;
         target_el = arm_phys_excp_target_el(cs, excp_idx, cur_el, secure);
@@ -367,19 +365,15 @@ bool arm_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         }
     }
 
-    qemu_mutex_unlock_iothread();
     return ret;
 }
 
 #if !defined(CONFIG_USER_ONLY) || !defined(TARGET_AARCH64)
 static bool arm_v7m_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
-    CPUClass *cc = CPU_GET_CLASS(cs);
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
     bool ret = false;
-
-    qemu_mutex_lock_iothread();
 
     /* ARMv7-M interrupt masking works differently than -A or -R.
      * There is no FIQ/IRQ distinction. Instead of I and F bits
@@ -388,13 +382,15 @@ static bool arm_v7m_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
      * (which depends on state like BASEPRI, FAULTMASK and the
      * currently active exception).
      */
-    if (interrupt_request & CPU_INTERRUPT_HARD
-        && (armv7m_nvic_can_take_pending_exception(env->nvic))) {
-        cs->exception_index = EXCP_IRQ;
-        cc->do_interrupt(cs);
-        ret = true;
+    if (interrupt_request & CPU_INTERRUPT_HARD) {
+        qemu_mutex_lock_iothread();
+        if (armv7m_nvic_can_take_pending_exception(env->nvic)) {
+            cs->exception_index = EXCP_IRQ;
+            arm_v7m_cpu_do_interrupt_locked(cs);
+            ret = true;
+        }
+        qemu_mutex_unlock_iothread();
     }
-    qemu_mutex_unlock_iothread();
     return ret;
 }
 #endif

@@ -7009,7 +7009,7 @@ gen_invep:
     return false;
 }
 
-void arm_v7m_cpu_do_interrupt(CPUState *cs)
+void arm_v7m_cpu_do_interrupt_locked(CPUState *cs)
 {
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
@@ -7191,6 +7191,13 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
     v7m_push_stack(cpu);
     v7m_exception_taken(cpu, lr, false);
     qemu_log_mask(CPU_LOG_INT, "... as %d\n", env->v7m.exception);
+}
+
+void arm_v7m_cpu_do_interrupt(CPUState *cs)
+{
+    qemu_mutex_lock_iothread();
+    arm_v7m_cpu_do_interrupt_locked(cs);
+    qemu_mutex_unlock_iothread();
 }
 
 /* Function used to synchronize QEMU's AArch64 register set with AArch32
