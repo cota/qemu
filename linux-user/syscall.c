@@ -7747,7 +7747,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             TaskState *ts;
 
             /* Remove the CPU from the list.  */
-            QTAILQ_REMOVE(&cpus, cpu, node);
+            QLIST_REMOVE_RCU(cpu, node);
 
             cpu_list_unlock();
 
