@@ -25,6 +25,7 @@
 #include "exec/hwaddr.h"
 #include "exec/memattrs.h"
 #include "qemu/bitmap.h"
+#include "qemu/rcu_queue.h"
 #include "qemu/queue.h"
 #include "qemu/thread.h"
 
@@ -367,7 +368,7 @@ struct CPUState {
     struct GDBRegisterState *gdb_regs;
     int gdb_num_regs;
     int gdb_num_g_regs;
-    QTAILQ_ENTRY(CPUState) node;
+    QLIST_ENTRY(CPUState) node;
 
     /* ice debug support */
     QTAILQ_HEAD(breakpoints_head, CPUBreakpoint) breakpoints;
@@ -429,15 +430,13 @@ struct CPUState {
     int hvf_fd;
 };
 
-QTAILQ_HEAD(CPUTailQ, CPUState);
+QLIST_HEAD(CPUTailQ, CPUState);
 extern struct CPUTailQ cpus;
-#define CPU_NEXT(cpu) QTAILQ_NEXT(cpu, node)
-#define CPU_FOREACH(cpu) QTAILQ_FOREACH(cpu, &cpus, node)
+#define CPU_NEXT(cpu) QLIST_NEXT_RCU(cpu, node)
+#define CPU_FOREACH(cpu) QLIST_FOREACH_RCU(cpu, &cpus, node)
 #define CPU_FOREACH_SAFE(cpu, next_cpu) \
-    QTAILQ_FOREACH_SAFE(cpu, &cpus, node, next_cpu)
-#define CPU_FOREACH_REVERSE(cpu) \
-    QTAILQ_FOREACH_REVERSE(cpu, &cpus, CPUTailQ, node)
-#define first_cpu QTAILQ_FIRST(&cpus)
+    QLIST_FOREACH_SAFE_RCU(cpu, &cpus, node, next_cpu)
+#define first_cpu QLIST_FIRST_RCU(&cpus)
 
 extern __thread CPUState *current_cpu;
 
