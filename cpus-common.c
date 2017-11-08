@@ -26,7 +26,6 @@
 static QemuMutex qemu_cpu_list_lock;
 static QemuCond exclusive_cond;
 static QemuCond exclusive_resume;
-static QemuCond qemu_work_cond;
 
 /* >= 1 if a thread is inside start_exclusive/end_exclusive.  Written
  * under qemu_cpu_list_lock, read with atomic operations.
@@ -42,7 +41,6 @@ void qemu_init_cpu_list(void)
     qemu_mutex_init(&qemu_cpu_list_lock);
     qemu_cond_init(&exclusive_cond);
     qemu_cond_init(&exclusive_resume);
-    qemu_cond_init(&qemu_work_cond);
 }
 
 void cpu_list_lock(void)
@@ -125,30 +123,39 @@ struct qemu_work_item {
     bool free, exclusive, done;
 };
 
-static void queue_work_on_cpu(CPUState *cpu, struct qemu_work_item *wi)
+static void queue_work_on_cpu__locked(CPUState *cpu, struct qemu_work_item *wi)
 {
-    qemu_mutex_lock(&cpu->work_mutex);
     if (cpu->queued_work_first == NULL) {
-        cpu->queued_work_first = wi;
+        atomic_set(&cpu->queued_work_first, wi);
     } else {
         cpu->queued_work_last->next = wi;
     }
     cpu->queued_work_last = wi;
     wi->next = NULL;
     wi->done = false;
-    qemu_mutex_unlock(&cpu->work_mutex);
 
     qemu_cpu_kick(cpu);
 }
 
-void do_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data,
-                   QemuMutex *mutex)
+static void queue_work_on_cpu(CPUState *cpu, struct qemu_work_item *wi)
+{
+    qemu_mutex_lock(&cpu->lock);
+    queue_work_on_cpu__locked(cpu, wi);
+    qemu_mutex_unlock(&cpu->lock);
+}
+
+void do_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
 {
     struct qemu_work_item wi;
+    bool has_bql = qemu_mutex_iothread_locked();
 
     if (qemu_cpu_is_self(cpu)) {
         func(cpu, data);
         return;
+    }
+
+    if (has_bql) {
+        qemu_mutex_unlock_iothread();
     }
 
     wi.func = func;
@@ -157,12 +164,19 @@ void do_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data,
     wi.free = false;
     wi.exclusive = false;
 
-    queue_work_on_cpu(cpu, &wi);
+    qemu_mutex_lock(&cpu->lock);
+    queue_work_on_cpu__locked(cpu, &wi);
+
     while (!atomic_mb_read(&wi.done)) {
         CPUState *self_cpu = current_cpu;
 
-        qemu_cond_wait(&qemu_work_cond, mutex);
+        qemu_cond_wait(&cpu->work_cond, &cpu->lock);
         current_cpu = self_cpu;
+    }
+    qemu_mutex_unlock(&cpu->lock);
+
+    if (has_bql) {
+        qemu_mutex_lock_iothread();
     }
 }
 
@@ -325,19 +339,20 @@ void async_safe_run_on_cpu(CPUState *cpu, run_on_cpu_func func,
 void process_queued_cpu_work(CPUState *cpu)
 {
     struct qemu_work_item *wi;
+    bool has_bql = qemu_mutex_iothread_locked();
 
-    if (cpu->queued_work_first == NULL) {
+    if (atomic_read(&cpu->queued_work_first) == NULL) {
         return;
     }
 
-    qemu_mutex_lock(&cpu->work_mutex);
+    qemu_mutex_lock(&cpu->lock);
     while (cpu->queued_work_first != NULL) {
         wi = cpu->queued_work_first;
-        cpu->queued_work_first = wi->next;
+        atomic_set(&cpu->queued_work_first, wi->next);
         if (!cpu->queued_work_first) {
             cpu->queued_work_last = NULL;
         }
-        qemu_mutex_unlock(&cpu->work_mutex);
+        qemu_mutex_unlock(&cpu->lock);
         if (wi->exclusive) {
             /* Running work items outside the BQL avoids the following deadlock:
              * 1) start_exclusive() is called with the BQL taken while another
@@ -345,21 +360,25 @@ void process_queued_cpu_work(CPUState *cpu)
              * BQL, so it goes to sleep; start_exclusive() is sleeping too, so
              * neither CPU can proceed.
              */
-            qemu_mutex_unlock_iothread();
+            if (has_bql) {
+                qemu_mutex_unlock_iothread();
+            }
             start_exclusive();
             wi->func(cpu, wi->data);
             end_exclusive();
-            qemu_mutex_lock_iothread();
+            if (has_bql) {
+                qemu_mutex_lock_iothread();
+            }
         } else {
             wi->func(cpu, wi->data);
         }
-        qemu_mutex_lock(&cpu->work_mutex);
+        qemu_mutex_lock(&cpu->lock);
         if (wi->free) {
             g_free(wi);
         } else {
             atomic_mb_set(&wi->done, true);
         }
     }
-    qemu_mutex_unlock(&cpu->work_mutex);
-    qemu_cond_broadcast(&qemu_work_cond);
+    qemu_mutex_unlock(&cpu->lock);
+    qemu_cond_broadcast(&cpu->work_cond);
 }
