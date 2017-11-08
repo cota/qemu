@@ -1201,15 +1201,21 @@ static void emulate_spapr_hypercall(PPCVirtualHypervisor *vhyp,
                                     PowerPCCPU *cpu)
 {
     CPUPPCState *env = &cpu->env;
+    bool has_bql = qemu_mutex_iothread_locked();
 
-    /* The TCG path should also be holding the BQL at this point */
-    g_assert(qemu_mutex_iothread_locked());
+    if (!has_bql) {
+        qemu_mutex_lock_iothread();
+    }
 
     if (msr_pr) {
         hcall_dprintf("Hypercall made with MSR[PR]=1\n");
         env->gpr[3] = H_PRIVILEGE;
     } else {
         env->gpr[3] = spapr_hypercall(cpu, env->gpr[3], &env->gpr[4]);
+    }
+
+    if (!has_bql) {
+        qemu_mutex_unlock_iothread();
     }
 }
 

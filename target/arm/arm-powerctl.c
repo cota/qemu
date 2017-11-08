@@ -124,8 +124,9 @@ static void arm_set_cpu_on_async_work(CPUState *target_cpu_state,
     g_free(info);
 
     /* Finally set the power status */
-    assert(qemu_mutex_iothread_locked());
+    qemu_mutex_lock_iothread();
     target_cpu->power_state = PSCI_ON;
+    qemu_mutex_unlock_iothread();
 }
 
 int arm_set_cpu_on(uint64_t cpuid, uint64_t entry, uint64_t context_id,
@@ -226,11 +227,17 @@ static void arm_set_cpu_off_async_work(CPUState *target_cpu_state,
                                        run_on_cpu_data data)
 {
     ARMCPU *target_cpu = ARM_CPU(target_cpu_state);
+    bool has_bql = qemu_mutex_iothread_locked();
 
-    assert(qemu_mutex_iothread_locked());
+    if (!has_bql) {
+        qemu_mutex_lock_iothread();
+    }
     target_cpu->power_state = PSCI_OFF;
     target_cpu_state->halted = 1;
     target_cpu_state->exception_index = EXCP_HLT;
+    if (!has_bql) {
+        qemu_mutex_unlock_iothread();
+    }
 }
 
 int arm_set_cpu_off(uint64_t cpuid)
