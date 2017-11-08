@@ -1856,8 +1856,11 @@ int kvm_cpu_exec(CPUState *cpu)
 
     DPRINTF("kvm_cpu_exec()\n");
 
+    qemu_mutex_lock_iothread();
+
     if (kvm_arch_process_async_events(cpu)) {
         atomic_set(&cpu->exit_request, 0);
+        qemu_mutex_unlock_iothread();
         return EXCP_HLT;
     }
 
@@ -2001,6 +2004,7 @@ int kvm_cpu_exec(CPUState *cpu)
     }
 
     atomic_set(&cpu->exit_request, 0);
+    qemu_mutex_unlock_iothread();
     return ret;
 }
 

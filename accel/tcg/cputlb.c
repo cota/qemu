@@ -60,7 +60,7 @@
 
 #define assert_cpu_is_self(this_cpu) do {                         \
         if (DEBUG_TLB_GATE) {                                     \
-            g_assert(!cpu->created || qemu_cpu_is_self(cpu));     \
+            g_assert(!cpu->local.created || qemu_cpu_is_self(cpu));     \
         }                                                         \
     } while (0)
 
@@ -143,7 +143,7 @@ static void tlb_flush_global_async_work(CPUState *cpu, run_on_cpu_data data)
 
 void tlb_flush(CPUState *cpu)
 {
-    if (cpu->created && !qemu_cpu_is_self(cpu)) {
+    if (cpu->local.created && !qemu_cpu_is_self(cpu)) {
         if (atomic_mb_read(&cpu->pending_tlb_flush) != ALL_MMUIDX_BITS) {
             atomic_mb_set(&cpu->pending_tlb_flush, ALL_MMUIDX_BITS);
             async_run_on_cpu(cpu, tlb_flush_global_async_work,

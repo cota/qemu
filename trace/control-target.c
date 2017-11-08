@@ -88,7 +88,7 @@ void trace_event_set_vcpu_state_dynamic(CPUState *vcpu,
             clear_bit(vcpu_id, vcpu->trace_dstate_delayed);
             (*ev->dstate)--;
         }
-        if (vcpu->created) {
+        if (vcpu->local.created) {
             /*
              * Delay changes until next TB; we want all TBs to be built from a
              * single set of dstate values to ensure consistency of generated

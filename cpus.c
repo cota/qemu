@@ -72,6 +72,50 @@
 
 #endif /* CONFIG_LINUX */
 
+#define DEBUG_CPU_LOCKING
+#ifdef DEBUG_CPU_LOCKING
+
+/* XXX is this really the max. number of possible CPU indices? */
+static __thread DECLARE_BITMAP(cpu_local_locked_bm, 1024);
+/* make sure we lock only one CPU at a time */
+static __thread bool cpu_local_locked;
+
+/* use macros so that the lock profiler can capture the call sites */
+#define cpu_local_lock(cpu) do {                        \
+        g_assert(!cpu_local_locked);                    \
+        cpu_local_locked = true;                        \
+        set_bit((cpu)->cpu_index, cpu_local_locked_bm); \
+        qemu_mutex_lock((cpu)->local.lock);             \
+    } while (0)
+
+#define cpu_local_unlock(cpu) do {                              \
+        g_assert(cpu_local_locked);                             \
+        cpu_local_locked = false;                               \
+        qemu_mutex_unlock((cpu)->local.lock);                   \
+        clear_bit((cpu)->cpu_index, cpu_local_locked_bm);       \
+    } while (0)
+
+#define assert_cpu_local_locked(cpu)                            \
+    g_assert(test_bit((cpu)->cpu_index, cpu_local_locked_bm))
+
+#define assert_no_cpu_local_locked()            \
+    g_assert(!cpu_local_locked)
+
+#else /* !DEBUG_CPU_LOCKING */
+
+#define cpu_local_lock(cpu)   qemu_mutex_lock((cpu)->local.lock)
+#define cpu_local_unlock(cpu) qemu_mutex_unlock((cpu)->local.lock)
+
+static void assert_cpu_local_locked(const CPUState *cpu)
+{
+}
+
+static void assert_no_cpu_local_locked(void)
+{
+}
+
+#endif /* !DEBUG_CPU_LOCKING */
+
 int64_t max_delay;
 int64_t max_advance;
 
@@ -83,17 +127,32 @@ static unsigned int throttle_percentage;
 #define CPU_THROTTLE_PCT_MAX 99
 #define CPU_THROTTLE_TIMESLICE_NS 10000000
 
+static bool cpu_is_stopped__locked(CPUState *cpu)
+{
+    assert_cpu_local_locked(cpu);
+
+    return cpu->local.stopped || !runstate_is_running();
+}
+
 bool cpu_is_stopped(CPUState *cpu)
 {
-    return cpu->stopped || !runstate_is_running();
+    bool ret;
+
+    assert_no_cpu_local_locked();
+    cpu_local_lock(cpu);
+    ret = cpu_is_stopped__locked(cpu);
+    cpu_local_unlock(cpu);
+    return ret;
 }
 
 static bool cpu_thread_is_idle(CPUState *cpu)
 {
-    if (cpu->stop || cpu->queued_work_first) {
+    assert_cpu_local_locked(cpu);
+
+    if (cpu->local.stop || cpu->local.queued_work_first) {
         return false;
     }
-    if (cpu_is_stopped(cpu)) {
+    if (cpu_is_stopped__locked(cpu)) {
         return true;
     }
     if (!cpu->halted || cpu_has_work(cpu) ||
@@ -108,9 +167,12 @@ static bool all_cpu_threads_idle(void)
     CPUState *cpu;
 
     CPU_FOREACH(cpu) {
+        cpu_local_lock(cpu);
         if (!cpu_thread_is_idle(cpu)) {
+            cpu_local_unlock(cpu);
             return false;
         }
+        cpu_local_unlock(cpu);
     }
     return true;
 }
@@ -1014,10 +1076,12 @@ static int do_vm_stop(RunState state)
 
 static bool cpu_can_run(CPUState *cpu)
 {
-    if (cpu->stop) {
+    assert_cpu_local_locked(cpu);
+
+    if (cpu->local.stop) {
         return false;
     }
-    if (cpu_is_stopped(cpu)) {
+    if (cpu_is_stopped__locked(cpu)) {
         return false;
     }
     return true;
@@ -1027,7 +1091,7 @@ static void cpu_handle_guest_debug(CPUState *cpu)
 {
     gdb_set_stop_cpu(cpu);
     qemu_system_debug_request();
-    cpu->stopped = true;
+    cpu->local.stopped = true;
 }
 
 #ifdef CONFIG_LINUX
@@ -1088,16 +1152,9 @@ static QemuMutex qemu_global_mutex;
 
 static QemuThread io_thread;
 
-/* cpu creation */
-static QemuCond qemu_cpu_cond;
-/* system init */
-static QemuCond qemu_pause_cond;
-
 void qemu_init_cpu_loop(void)
 {
     qemu_init_sigbus();
-    qemu_cond_init(&qemu_cpu_cond);
-    qemu_cond_init(&qemu_pause_cond);
     qemu_mutex_init(&qemu_global_mutex);
 
     qemu_thread_get_self(&io_thread);
@@ -1105,7 +1162,7 @@ void qemu_init_cpu_loop(void)
 
 void run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
 {
-    do_run_on_cpu(cpu, func, data, &qemu_global_mutex);
+    do_run_on_cpu(cpu, func, data);
 }
 
 static void qemu_kvm_destroy_vcpu(CPUState *cpu)
@@ -1123,39 +1180,51 @@ static void qemu_tcg_destroy_vcpu(CPUState *cpu)
 static void qemu_cpu_stop(CPUState *cpu, bool exit)
 {
     g_assert(qemu_cpu_is_self(cpu));
-    cpu->stop = false;
-    cpu->stopped = true;
+    assert_cpu_local_locked(cpu);
+    cpu->local.stop = false;
+    cpu->local.stopped = true;
     if (exit) {
         cpu_exit(cpu);
     }
-    qemu_cond_broadcast(&qemu_pause_cond);
+    qemu_cond_broadcast(cpu->local.cond);
 }
 
 static void qemu_wait_io_event_common(CPUState *cpu)
 {
+    assert_cpu_local_locked(cpu);
+
     atomic_mb_set(&cpu->thread_kicked, false);
-    if (cpu->stop) {
+    if (cpu->local.stop) {
         qemu_cpu_stop(cpu, false);
     }
+    cpu_local_unlock(cpu);
     process_queued_cpu_work(cpu);
+    cpu_local_lock(cpu);
 }
 
 static void qemu_tcg_rr_wait_io_event(CPUState *cpu)
 {
     while (all_cpu_threads_idle()) {
         stop_tcg_kick_timer();
-        qemu_cond_wait(cpu->halt_cond, &qemu_global_mutex);
+        cpu_local_lock(cpu);
+        qemu_cond_wait(cpu->local.cond, cpu->local.lock);
+        cpu_local_unlock(cpu);
     }
 
     start_tcg_kick_timer();
 
+    cpu_local_lock(cpu);
     qemu_wait_io_event_common(cpu);
+    cpu_local_unlock(cpu);
 }
 
 static void qemu_wait_io_event(CPUState *cpu)
 {
+    g_assert(!qemu_mutex_iothread_locked());
+    assert_cpu_local_locked(cpu);
+
     while (cpu_thread_is_idle(cpu)) {
-        qemu_cond_wait(cpu->halt_cond, &qemu_global_mutex);
+        qemu_cond_wait(cpu->local.cond, cpu->local.lock);
     }
 
 #ifdef _WIN32
@@ -1187,24 +1256,32 @@ static void *qemu_kvm_cpu_thread_fn(void *arg)
     }
 
     kvm_init_cpu_signals(cpu);
+    qemu_mutex_unlock_iothread();
 
     /* signal CPU creation */
-    cpu->created = true;
-    qemu_cond_signal(&qemu_cpu_cond);
+    cpu_local_lock(cpu);
+    cpu->local.created = true;
+    qemu_cond_signal(cpu->local.cond);
 
     do {
         if (cpu_can_run(cpu)) {
+            cpu_local_unlock(cpu);
             r = kvm_cpu_exec(cpu);
+            cpu_local_lock(cpu);
             if (r == EXCP_DEBUG) {
                 cpu_handle_guest_debug(cpu);
             }
         }
         qemu_wait_io_event(cpu);
-    } while (!cpu->unplug || cpu_can_run(cpu));
+    } while (!cpu->local.unplug || cpu_can_run(cpu));
+    cpu_local_unlock(cpu);
 
+    qemu_mutex_lock_iothread();
     qemu_kvm_destroy_vcpu(cpu);
-    cpu->created = false;
-    qemu_cond_signal(&qemu_cpu_cond);
+    cpu_local_lock(cpu);
+    cpu->local.created = false;
+    qemu_cond_signal(cpu->local.cond);
+    cpu_local_unlock(cpu);
     qemu_mutex_unlock_iothread();
     rcu_unregister_thread();
     return NULL;
@@ -1232,11 +1309,12 @@ static void *qemu_dummy_cpu_thread_fn(void *arg)
     sigaddset(&waitset, SIG_IPI);
 
     /* signal CPU creation */
-    cpu->created = true;
-    qemu_cond_signal(&qemu_cpu_cond);
+    cpu_local_lock(cpu);
+    cpu->local.created = true;
+    qemu_cond_signal(cpu->local.cond);
 
     do {
-        qemu_mutex_unlock_iothread();
+        cpu_local_unlock(cpu);
         do {
             int sig;
             r = sigwait(&waitset, &sig);
@@ -1245,9 +1323,9 @@ static void *qemu_dummy_cpu_thread_fn(void *arg)
             perror("sigwait");
             exit(1);
         }
-        qemu_mutex_lock_iothread();
+        cpu_local_lock(cpu);
         qemu_wait_io_event(cpu);
-    } while (!cpu->unplug);
+    } while (!cpu->local.unplug);
 
     rcu_unregister_thread();
     return NULL;
@@ -1336,12 +1414,11 @@ static int tcg_cpu_exec(CPUState *cpu)
 #ifdef CONFIG_PROFILER
     ti = profile_getclock();
 #endif
-    qemu_mutex_unlock_iothread();
     cpu_exec_start(cpu);
     ret = cpu_exec(cpu);
     cpu_exec_end(cpu);
-    qemu_mutex_lock_iothread();
 #ifdef CONFIG_PROFILER
+    /* XXX */
     tcg_time += profile_getclock() - ti;
 #endif
     return ret;
@@ -1355,12 +1432,13 @@ static void deal_with_unplugged_cpus(void)
     CPUState *cpu;
 
     CPU_FOREACH(cpu) {
-        if (cpu->unplug && !cpu_can_run(cpu)) {
+        cpu_local_lock(cpu);
+        if (cpu->local.unplug && !cpu_can_run(cpu)) {
             qemu_tcg_destroy_vcpu(cpu);
-            cpu->created = false;
-            qemu_cond_signal(&qemu_cpu_cond);
-            break;
+            cpu->local.created = false;
+            qemu_cond_signal(cpu->local.cond);
         }
+        cpu_local_unlock(cpu);
     }
 }
 
@@ -1380,33 +1458,45 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
     rcu_register_thread();
     tcg_register_thread();
 
-    qemu_mutex_lock_iothread();
     qemu_thread_get_self(cpu->thread);
 
     CPU_FOREACH(cpu) {
+        cpu_local_lock(cpu);
         cpu->thread_id = qemu_get_thread_id();
-        cpu->created = true;
+        cpu->local.created = true;
         cpu->can_do_io = 1;
+        qemu_cond_signal(cpu->local.cond);
+        cpu_local_unlock(cpu);
     }
-    qemu_cond_signal(&qemu_cpu_cond);
 
     /* wait for initial kick-off after machine start */
-    while (first_cpu->stopped) {
-        qemu_cond_wait(first_cpu->halt_cond, &qemu_global_mutex);
+    cpu_local_lock(first_cpu);
+    while (first_cpu->local.stopped) {
+        qemu_cond_wait(first_cpu->local.cond, first_cpu->local.lock);
+        cpu_local_unlock(first_cpu);
 
         /* process any pending work */
         CPU_FOREACH(cpu) {
+            cpu_local_lock(cpu);
             current_cpu = cpu;
             qemu_wait_io_event_common(cpu);
+            cpu_local_unlock(cpu);
         }
-    }
 
+        cpu_local_lock(first_cpu);
+    }
+    cpu_local_unlock(first_cpu);
+
+    /* The iothread must always be acquired _before_ any CPU lock */
+    qemu_mutex_lock_iothread();
     start_tcg_kick_timer();
 
     cpu = first_cpu;
 
+    cpu_local_lock(cpu);
     /* process any pending work */
     cpu->exit_request = 1;
+    cpu_local_unlock(cpu);
 
     while (1) {
         /* Account partial waits to QEMU_CLOCK_VIRTUAL.  */
@@ -1421,7 +1511,11 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
             cpu = first_cpu;
         }
 
-        while (cpu && !cpu->queued_work_first && !cpu->exit_request) {
+        while (cpu) {
+            cpu_local_lock(cpu);
+            if (cpu->local.queued_work_first || cpu->exit_request) {
+                break;
+            }
 
             atomic_mb_set(&tcg_current_rr_cpu, cpu);
             current_cpu = cpu;
@@ -1434,7 +1528,11 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
 
                 prepare_icount_for_run(cpu);
 
+                cpu_local_unlock(cpu);
+                qemu_mutex_unlock_iothread();
                 r = tcg_cpu_exec(cpu);
+                qemu_mutex_lock_iothread();
+                cpu_local_lock(cpu);
 
                 process_icount_data(cpu);
 
@@ -1442,32 +1540,41 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
                     cpu_handle_guest_debug(cpu);
                     break;
                 } else if (r == EXCP_ATOMIC) {
+                    cpu_local_unlock(cpu);
                     qemu_mutex_unlock_iothread();
                     cpu_exec_step_atomic(cpu);
                     qemu_mutex_lock_iothread();
+                    cpu_local_lock(cpu);
                     break;
                 }
-            } else if (cpu->stop) {
-                if (cpu->unplug) {
+            } else if (cpu->local.stop) {
+                if (cpu->local.unplug) {
+                    cpu_local_unlock(cpu);
                     cpu = CPU_NEXT(cpu);
                 }
                 break;
             }
 
+            cpu_local_unlock(cpu);
             cpu = CPU_NEXT(cpu);
         } /* while (cpu && !cpu->exit_request).. */
 
         /* Does not need atomic_mb_set because a spurious wakeup is okay.  */
         atomic_set(&tcg_current_rr_cpu, NULL);
 
-        if (cpu && cpu->exit_request) {
-            atomic_mb_set(&cpu->exit_request, 0);
+        /* if we exited the loop and cpu is set, then the cpu is locked */
+        if (cpu) {
+            if (cpu->exit_request) {
+                atomic_mb_set(&cpu->exit_request, 0);
+            }
+            cpu_local_unlock(cpu);
         }
 
         qemu_tcg_rr_wait_io_event(cpu ? cpu : QLIST_FIRST_RCU(&cpus));
         deal_with_unplugged_cpus();
     }
 
+    qemu_mutex_unlock_iothread();
     rcu_unregister_thread();
     return NULL;
 }
@@ -1482,23 +1589,29 @@ static void *qemu_hax_cpu_thread_fn(void *arg)
     qemu_thread_get_self(cpu->thread);
 
     cpu->thread_id = qemu_get_thread_id();
-    cpu->created = true;
     cpu->halted = 0;
     current_cpu = cpu;
 
     hax_init_vcpu(cpu);
-    qemu_cond_signal(&qemu_cpu_cond);
+    qemu_mutex_unlock_iothread();
+    cpu_local_lock(cpu);
+    cpu->local.created = true;
+    qemu_cond_signal(cpu->local.cond);
 
     do {
         if (cpu_can_run(cpu)) {
+            cpu_local_unlock(cpu);
             r = hax_smp_cpu_exec(cpu);
+            cpu_local_lock(cpu);
             if (r == EXCP_DEBUG) {
                 cpu_handle_guest_debug(cpu);
             }
         }
-
+        qemu_mutex_unlock_iothread();
         qemu_wait_io_event(cpu);
-    } while (!cpu->unplug || cpu_can_run(cpu));
+        qemu_mutex_lock_iothread();
+    } while (!cpu->local.unplug || cpu_can_run(cpu));
+    cpu_local_unlock(cpu);
     rcu_unregister_thread();
     return NULL;
 }
@@ -1514,7 +1627,6 @@ static void *qemu_hvf_cpu_thread_fn(void *arg)
     assert(hvf_enabled());
 
     rcu_register_thread();
-
     qemu_mutex_lock_iothread();
     qemu_thread_get_self(cpu->thread);
 
@@ -1525,22 +1637,28 @@ static void *qemu_hvf_cpu_thread_fn(void *arg)
     hvf_init_vcpu(cpu);
 
     /* signal CPU creation */
-    cpu->created = true;
-    qemu_cond_signal(&qemu_cpu_cond);
+    cpu_local_lock(cpu);
+    cpu->local.created = true;
+    qemu_cond_signal(cpu->local.cond);
 
     do {
         if (cpu_can_run(cpu)) {
+            cpu_local_unlock(cpu);
             r = hvf_vcpu_exec(cpu);
+            cpu_local_lock(cpu);
             if (r == EXCP_DEBUG) {
                 cpu_handle_guest_debug(cpu);
             }
         }
+        qemu_mutex_unlock_iothread();
         qemu_wait_io_event(cpu);
-    } while (!cpu->unplug || cpu_can_run(cpu));
+        qemu_mutex_lock_iothread();
+    } while (!cpu->local.unplug || cpu_can_run(cpu));
 
     hvf_vcpu_destroy(cpu);
-    cpu->created = false;
-    qemu_cond_signal(&qemu_cpu_cond);
+    cpu->local.created = false;
+    qemu_cond_signal(cpu->local.cond);
+    cpu_local_unlock(cpu);
     qemu_mutex_unlock_iothread();
     rcu_unregister_thread();
     return NULL;
@@ -1553,10 +1671,10 @@ static void *qemu_whpx_cpu_thread_fn(void *arg)
 
     rcu_register_thread();
 
-    qemu_mutex_lock_iothread();
     qemu_thread_get_self(cpu->thread);
     cpu->thread_id = qemu_get_thread_id();
     current_cpu = cpu;
+    qemu_mutex_lock_iothread();
 
     r = whpx_init_vcpu(cpu);
     if (r < 0) {
@@ -1565,25 +1683,31 @@ static void *qemu_whpx_cpu_thread_fn(void *arg)
     }
 
     /* signal CPU creation */
-    cpu->created = true;
-    qemu_cond_signal(&qemu_cpu_cond);
+    cpu_local_lock(cpu);
+    cpu->local.created = true;
+    qemu_cond_signal(cpu->local.cond);
 
     do {
         if (cpu_can_run(cpu)) {
+            cpu_local_unlock(cpu);
             r = whpx_vcpu_exec(cpu);
+            cpu_local_lock(cpu);
             if (r == EXCP_DEBUG) {
                 cpu_handle_guest_debug(cpu);
             }
         }
+        qemu_mutex_unlock_iothread();
         while (cpu_thread_is_idle(cpu)) {
-            qemu_cond_wait(cpu->halt_cond, &qemu_global_mutex);
+            qemu_cond_wait(cpu->local.cond, cpu->local.lock);
         }
         qemu_wait_io_event_common(cpu);
-    } while (!cpu->unplug || cpu_can_run(cpu));
+        qemu_mutex_lock_iothread();
+    } while (!cpu->local.unplug || cpu_can_run(cpu));
 
     whpx_destroy_vcpu(cpu);
-    cpu->created = false;
-    qemu_cond_signal(&qemu_cpu_cond);
+    cpu->local.created = false;
+    qemu_cond_signal(cpu->local.cond);
+    cpu_local_unlock(cpu);
     qemu_mutex_unlock_iothread();
     rcu_unregister_thread();
     return NULL;
@@ -1611,14 +1735,14 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
     rcu_register_thread();
     tcg_register_thread();
 
-    qemu_mutex_lock_iothread();
+    cpu_local_lock(cpu);
     qemu_thread_get_self(cpu->thread);
 
     cpu->thread_id = qemu_get_thread_id();
-    cpu->created = true;
+    cpu->local.created = true;
     cpu->can_do_io = 1;
     current_cpu = cpu;
-    qemu_cond_signal(&qemu_cpu_cond);
+    qemu_cond_signal(cpu->local.cond);
 
     /* process any pending work */
     cpu->exit_request = 1;
@@ -1626,7 +1750,9 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
     while (1) {
         if (cpu_can_run(cpu)) {
             int r;
+            cpu_local_unlock(cpu);
             r = tcg_cpu_exec(cpu);
+            cpu_local_lock(cpu);
             switch (r) {
             case EXCP_DEBUG:
                 cpu_handle_guest_debug(cpu);
@@ -1642,9 +1768,9 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
                 g_assert(cpu->halted);
                 break;
             case EXCP_ATOMIC:
-                qemu_mutex_unlock_iothread();
+                cpu_local_unlock(cpu);
                 cpu_exec_step_atomic(cpu);
-                qemu_mutex_lock_iothread();
+                cpu_local_lock(cpu);
             default:
                 /* Ignore everything else? */
                 break;
@@ -1653,12 +1779,12 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
 
         atomic_mb_set(&cpu->exit_request, 0);
         qemu_wait_io_event(cpu);
-    } while (!cpu->unplug || cpu_can_run(cpu));
+    } while (!cpu->local.unplug || cpu_can_run(cpu));
 
     qemu_tcg_destroy_vcpu(cpu);
-    cpu->created = false;
-    qemu_cond_signal(&qemu_cpu_cond);
-    qemu_mutex_unlock_iothread();
+    cpu->local.created = false;
+    qemu_cond_signal(cpu->local.cond);
+    cpu_local_unlock(cpu);
     rcu_unregister_thread();
     return NULL;
 }
@@ -1692,7 +1818,7 @@ static void qemu_cpu_kick_thread(CPUState *cpu)
 
 void qemu_cpu_kick(CPUState *cpu)
 {
-    qemu_cond_broadcast(cpu->halt_cond);
+    qemu_cond_broadcast(cpu->local.cond);
     if (tcg_enabled()) {
         cpu_exit(cpu);
         /* NOP unless doing single-thread RR */
@@ -1740,6 +1866,7 @@ bool qemu_mutex_iothread_locked(void)
 void do_qemu_mutex_lock_iothread(const char *file, int line)
 {
     g_assert(!qemu_mutex_iothread_locked());
+    assert_no_cpu_local_locked();
     qsp_bql_mutex_lock(&qemu_global_mutex, file, line);
     iothread_locked = true;
 }
@@ -1747,6 +1874,7 @@ void do_qemu_mutex_lock_iothread(const char *file, int line)
 void do_qemu_mutex_lock_iothread(void)
 {
     g_assert(!qemu_mutex_iothread_locked());
+    assert_no_cpu_local_locked();
     qemu_mutex_lock(&qemu_global_mutex);
     iothread_locked = true;
 }
@@ -1759,46 +1887,44 @@ void qemu_mutex_unlock_iothread(void)
     qemu_mutex_unlock(&qemu_global_mutex);
 }
 
-static bool all_vcpus_paused(void)
-{
-    CPUState *cpu;
-
-    CPU_FOREACH(cpu) {
-        if (!cpu->stopped) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 void pause_all_vcpus(void)
 {
     CPUState *cpu;
 
     qemu_clock_enable(QEMU_CLOCK_VIRTUAL, false);
+    qemu_mutex_unlock_iothread();
+
     CPU_FOREACH(cpu) {
+        cpu_local_lock(cpu);
         if (qemu_cpu_is_self(cpu)) {
             qemu_cpu_stop(cpu, true);
         } else {
-            cpu->stop = true;
+            cpu->local.stop = true;
             qemu_cpu_kick(cpu);
         }
+        cpu_local_unlock(cpu);
     }
 
-    while (!all_vcpus_paused()) {
-        qemu_cond_wait(&qemu_pause_cond, &qemu_global_mutex);
-        CPU_FOREACH(cpu) {
+    CPU_FOREACH(cpu) {
+        cpu_local_lock(cpu);
+        if (unlikely(!cpu->local.stopped)) {
             qemu_cpu_kick(cpu);
+            g_assert(!qemu_mutex_iothread_locked());
+            qemu_cond_wait(cpu->local.cond, cpu->local.lock);
         }
+        cpu_local_unlock(cpu);
     }
+
+    qemu_mutex_lock_iothread();
 }
 
 void cpu_resume(CPUState *cpu)
 {
-    cpu->stop = false;
-    cpu->stopped = false;
+    cpu_local_lock(cpu);
+    cpu->local.stop = false;
+    cpu->local.stopped = false;
     qemu_cpu_kick(cpu);
+    cpu_local_unlock(cpu);
 }
 
 void resume_all_vcpus(void)
@@ -1813,11 +1939,26 @@ void resume_all_vcpus(void)
 
 void cpu_remove_sync(CPUState *cpu)
 {
-    cpu->stop = true;
-    cpu->unplug = true;
-    qemu_cpu_kick(cpu);
     qemu_mutex_unlock_iothread();
+
+    cpu_local_lock(cpu);
+    cpu->local.stop = true;
+    cpu->local.unplug = true;
+    qemu_cpu_kick(cpu);
+    cpu_local_unlock(cpu);
+
     qemu_thread_join(cpu->thread);
+    qemu_mutex_lock_iothread();
+}
+
+static void wait_for_cpu_creation(CPUState *cpu)
+{
+    qemu_mutex_unlock_iothread();
+    cpu_local_lock(cpu);
+    while (!cpu->local.created) {
+        qemu_cond_wait(cpu->local.cond, cpu->local.lock);
+    }
+    cpu_local_unlock(cpu);
     qemu_mutex_lock_iothread();
 }
 
@@ -1827,8 +1968,9 @@ void cpu_remove_sync(CPUState *cpu)
 static void qemu_tcg_init_vcpu(CPUState *cpu)
 {
     char thread_name[VCPU_THREAD_NAME_SIZE];
-    static QemuCond *single_tcg_halt_cond;
+    static QemuCond *single_tcg_cond;
     static QemuThread *single_tcg_cpu_thread;
+    static QemuMutex *single_tcg_lock;
     static int tcg_region_inited;
 
     /*
@@ -1844,8 +1986,10 @@ static void qemu_tcg_init_vcpu(CPUState *cpu)
 
     if (qemu_tcg_mttcg_enabled() || !single_tcg_cpu_thread) {
         cpu->thread = g_malloc0(sizeof(QemuThread));
-        cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-        qemu_cond_init(cpu->halt_cond);
+        cpu->local.cond = g_malloc0(sizeof(QemuCond));
+        qemu_cond_init(cpu->local.cond);
+        cpu->local.lock = g_malloc0(sizeof(QemuMutex));
+        qemu_mutex_init(cpu->local.lock);
 
         if (qemu_tcg_mttcg_enabled()) {
             /* create a thread per vCPU with TCG (MTTCG) */
@@ -1862,20 +2006,19 @@ static void qemu_tcg_init_vcpu(CPUState *cpu)
             qemu_thread_create(cpu->thread, thread_name,
                                qemu_tcg_rr_cpu_thread_fn,
                                cpu, QEMU_THREAD_JOINABLE);
-
-            single_tcg_halt_cond = cpu->halt_cond;
+            single_tcg_cond = cpu->local.cond;
             single_tcg_cpu_thread = cpu->thread;
+            single_tcg_lock = cpu->local.lock;
         }
 #ifdef _WIN32
         cpu->hThread = qemu_thread_get_handle(cpu->thread);
 #endif
-        while (!cpu->created) {
-            qemu_cond_wait(&qemu_cpu_cond, &qemu_global_mutex);
-        }
+        wait_for_cpu_creation(cpu);
     } else {
         /* For non-MTTCG cases we share the thread */
         cpu->thread = single_tcg_cpu_thread;
-        cpu->halt_cond = single_tcg_halt_cond;
+        cpu->local.cond = single_tcg_cond;
+        cpu->local.lock = single_tcg_lock;
     }
 }
 
@@ -1884,8 +2027,10 @@ static void qemu_hax_start_vcpu(CPUState *cpu)
     char thread_name[VCPU_THREAD_NAME_SIZE];
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
+    cpu->local.cond = g_malloc0(sizeof(QemuCond));
+    qemu_cond_init(cpu->local.cond);
+    cpu->local.lock = g_malloc0(sizeof(QemuMutex));
+    qemu_mutex_init(cpu->local.lock);
 
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/HAX",
              cpu->cpu_index);
@@ -1894,9 +2039,7 @@ static void qemu_hax_start_vcpu(CPUState *cpu)
 #ifdef _WIN32
     cpu->hThread = qemu_thread_get_handle(cpu->thread);
 #endif
-    while (!cpu->created) {
-        qemu_cond_wait(&qemu_cpu_cond, &qemu_global_mutex);
-    }
+    wait_for_cpu_creation(cpu);
 }
 
 static void qemu_kvm_start_vcpu(CPUState *cpu)
@@ -1904,15 +2047,16 @@ static void qemu_kvm_start_vcpu(CPUState *cpu)
     char thread_name[VCPU_THREAD_NAME_SIZE];
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
+    cpu->local.cond = g_malloc0(sizeof(QemuCond));
+    qemu_cond_init(cpu->local.cond);
+    cpu->local.lock = g_malloc0(sizeof(QemuMutex));
+    qemu_mutex_init(cpu->local.lock);
+
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/KVM",
              cpu->cpu_index);
     qemu_thread_create(cpu->thread, thread_name, qemu_kvm_cpu_thread_fn,
                        cpu, QEMU_THREAD_JOINABLE);
-    while (!cpu->created) {
-        qemu_cond_wait(&qemu_cpu_cond, &qemu_global_mutex);
-    }
+    wait_for_cpu_creation(cpu);
 }
 
 static void qemu_hvf_start_vcpu(CPUState *cpu)
@@ -1924,16 +2068,16 @@ static void qemu_hvf_start_vcpu(CPUState *cpu)
     assert(hvf_enabled());
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
+    cpu->local.cond = g_malloc0(sizeof(QemuCond));
+    qemu_cond_init(cpu->local.cond);
+    cpu->local.lock = g_malloc0(sizeof(QemuMutex));
+    qemu_mutex_init(cpu->local.lock);
 
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/HVF",
              cpu->cpu_index);
     qemu_thread_create(cpu->thread, thread_name, qemu_hvf_cpu_thread_fn,
                        cpu, QEMU_THREAD_JOINABLE);
-    while (!cpu->created) {
-        qemu_cond_wait(&qemu_cpu_cond, &qemu_global_mutex);
-    }
+    wait_for_cpu_creation(cpu);
 }
 
 static void qemu_whpx_start_vcpu(CPUState *cpu)
@@ -1941,8 +2085,10 @@ static void qemu_whpx_start_vcpu(CPUState *cpu)
     char thread_name[VCPU_THREAD_NAME_SIZE];
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
+    cpu->local.cond = g_malloc0(sizeof(QemuCond));
+    qemu_cond_init(cpu->local.cond);
+    cpu->local.lock = g_malloc0(sizeof(QemuMutex));
+    qemu_mutex_init(cpu->local.lock);
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/WHPX",
              cpu->cpu_index);
     qemu_thread_create(cpu->thread, thread_name, qemu_whpx_cpu_thread_fn,
@@ -1950,9 +2096,7 @@ static void qemu_whpx_start_vcpu(CPUState *cpu)
 #ifdef _WIN32
     cpu->hThread = qemu_thread_get_handle(cpu->thread);
 #endif
-    while (!cpu->created) {
-        qemu_cond_wait(&qemu_cpu_cond, &qemu_global_mutex);
-    }
+    wait_for_cpu_creation(cpu);
 }
 
 static void qemu_dummy_start_vcpu(CPUState *cpu)
@@ -1960,22 +2104,22 @@ static void qemu_dummy_start_vcpu(CPUState *cpu)
     char thread_name[VCPU_THREAD_NAME_SIZE];
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
+    cpu->local.cond = g_malloc0(sizeof(QemuCond));
+    qemu_cond_init(cpu->local.cond);
+    cpu->local.lock = g_malloc0(sizeof(QemuMutex));
+    qemu_mutex_init(cpu->local.lock);
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/DUMMY",
              cpu->cpu_index);
     qemu_thread_create(cpu->thread, thread_name, qemu_dummy_cpu_thread_fn, cpu,
                        QEMU_THREAD_JOINABLE);
-    while (!cpu->created) {
-        qemu_cond_wait(&qemu_cpu_cond, &qemu_global_mutex);
-    }
+    wait_for_cpu_creation(cpu);
 }
 
 void qemu_init_vcpu(CPUState *cpu)
 {
     cpu->nr_cores = smp_cores;
     cpu->nr_threads = smp_threads;
-    cpu->stopped = true;
+    cpu->local.stopped = true;
 
     if (!cpu->as) {
         /* If the target cpu hasn't set up any address spaces itself,
