@@ -412,6 +412,7 @@ static void cpu_common_initfn(Object *obj)
 
     qemu_mutex_init(&cpu->lock);
     qemu_cond_init(&cpu->work_cond);
+    qemu_cond_init(&cpu->exclusive_req_cond);
 
     QTAILQ_INIT(&cpu->breakpoints);
     QTAILQ_INIT(&cpu->watchpoints);

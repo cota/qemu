@@ -1293,11 +1293,9 @@ static int tcg_cpu_exec(CPUState *cpu)
 #ifdef CONFIG_PROFILER
     ti = profile_getclock();
 #endif
-    cpu_mutex_unlock(cpu);
-    cpu_exec_start(cpu);
+    cpu_exec_start__locked(cpu);
     ret = cpu_exec(cpu);
-    cpu_exec_end(cpu);
-    cpu_mutex_lock(cpu);
+    cpu_exec_end__retlocked(cpu);
 #ifdef CONFIG_PROFILER
     /* XXX */
     tcg_time += profile_getclock() - ti;
