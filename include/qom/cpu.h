@@ -336,8 +336,11 @@ struct CPUState {
     HANDLE hThread;
 #endif
     int thread_id;
-    bool running, has_waiter;
+    bool running;
     struct QemuCond *halt_cond;
+    struct QemuCond exclusive_req_cond;
+    bool exclusive_req;
+    bool exclusive_req_waiter;
     bool thread_kicked;
     bool created;
     bool stop;
@@ -969,6 +972,7 @@ void process_queued_cpu_work(CPUState *cpu);
  * cpu_exit.
  */
 void cpu_exec_start(CPUState *cpu);
+void cpu_exec_start__locked(CPUState *cpu);
 
 /**
  * cpu_exec_end:
@@ -978,6 +982,7 @@ void cpu_exec_start(CPUState *cpu);
  * can be executed without interrupting it.
  */
 void cpu_exec_end(CPUState *cpu);
+void cpu_exec_end__retlocked(CPUState *cpu);
 
 /**
  * start_exclusive:
