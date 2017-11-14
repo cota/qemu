@@ -313,7 +313,7 @@ struct qemu_work_item;
  * @mem_io_vaddr: Target virtual address at which the memory was accessed.
  * @kvm_fd: vCPU file descriptor for KVM.
  * @lock: Lock to serialize access to: XXX
- * @queued_work_first: First asynchronous work pending.
+ * @queued_work: List of pending asynchronous work.
  * @trace_dstate_delayed: Delayed changes to trace_dstate (includes all changes
  *                        to @trace_dstate).
  * @trace_dstate: Dynamic tracing state of events for this vCPU (bitmask).
@@ -359,7 +359,7 @@ struct CPUState {
     QemuMutex lock;
     QemuCond work_cond;
     QemuCond cond;
-    struct qemu_work_item *queued_work_first, *queued_work_last;
+    QSIMPLEQ_HEAD(, qemu_work_item) queued_work;
 
     CPUAddressSpace *cpu_ases;
     int num_ases;

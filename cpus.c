@@ -92,7 +92,7 @@ static bool cpu_thread_is_idle(CPUState *cpu)
 {
     g_assert(!mttcg_enabled || cpu_mutex_locked(cpu));
 
-    if (cpu->stop || cpu->queued_work_first) {
+    if (cpu->stop || !QSIMPLEQ_EMPTY(&cpu->queued_work)) {
         return false;
     }
     if (cpu_is_stopped(cpu)) {
@@ -1377,7 +1377,7 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
             cpu = first_cpu;
         }
 
-        while (cpu && !cpu->queued_work_first && !cpu->exit_request) {
+        while (cpu && QSIMPLEQ_EMPTY(&cpu->queued_work) && !cpu->exit_request) {
 
             atomic_mb_set(&tcg_current_rr_cpu, cpu);
             current_cpu = cpu;
