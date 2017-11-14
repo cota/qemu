@@ -129,7 +129,7 @@ void cpu_list_remove(CPUState *cpu)
 }
 
 struct qemu_work_item {
-    struct qemu_work_item *next;
+    QSIMPLEQ_ENTRY(qemu_work_item) node;
     run_on_cpu_func func;
     run_on_cpu_data data;
     bool free, exclusive, done;
@@ -137,13 +137,7 @@ struct qemu_work_item {
 
 static void queue_work_on_cpu__locked(CPUState *cpu, struct qemu_work_item *wi)
 {
-    if (cpu->queued_work_first == NULL) {
-        atomic_set(&cpu->queued_work_first, wi);
-    } else {
-        cpu->queued_work_last->next = wi;
-    }
-    cpu->queued_work_last = wi;
-    wi->next = NULL;
+    QSIMPLEQ_INSERT_TAIL(&cpu->queued_work, wi, node);
     wi->done = false;
 
     qemu_cpu_kick(cpu);
@@ -319,17 +313,10 @@ void process_queued_cpu_work(CPUState *cpu)
     struct qemu_work_item *wi;
     bool has_bql = qemu_mutex_iothread_locked();
 
-    if (atomic_read(&cpu->queued_work_first) == NULL) {
-        return;
-    }
-
     qemu_mutex_lock(&cpu->lock);
-    while (cpu->queued_work_first != NULL) {
-        wi = cpu->queued_work_first;
-        atomic_set(&cpu->queued_work_first, wi->next);
-        if (!cpu->queued_work_first) {
-            cpu->queued_work_last = NULL;
-        }
+    while (!QSIMPLEQ_EMPTY(&cpu->queued_work)) {
+        wi = QSIMPLEQ_FIRST(&cpu->queued_work);
+        QSIMPLEQ_REMOVE_HEAD(&cpu->queued_work, node);
         qemu_mutex_unlock(&cpu->lock);
         if (wi->exclusive) {
             /* Running work items outside the BQL avoids the following deadlock:
