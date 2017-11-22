@@ -135,6 +135,7 @@ typedef struct DisasContext {
     int cpuid_ext3_features;
     int cpuid_7_0_ebx_features;
     int cpuid_xsave_features;
+    struct qemu_plugin_insn *plugin_insn;
     sigjmp_buf jmpbuf;
 } DisasContext;
 
@@ -1889,28 +1890,53 @@ static uint64_t advance_pc(CPUX86State *env, DisasContext *s, int num_bytes)
 
 static inline uint8_t x86_ldub_code(CPUX86State *env, DisasContext *s)
 {
-    return cpu_ldub_code(env, advance_pc(env, s, 1));
+    uint8_t ret = cpu_ldub_code(env, advance_pc(env, s, 1));
+
+    if (s->plugin_insn) {
+        qemu_plugin_insn_append(s->plugin_insn, &ret, sizeof(ret));
+    }
+    return ret;
 }
 
 static inline int16_t x86_ldsw_code(CPUX86State *env, DisasContext *s)
 {
-    return cpu_ldsw_code(env, advance_pc(env, s, 2));
+    int16_t ret = cpu_ldsw_code(env, advance_pc(env, s, 2));
+
+    if (s->plugin_insn) {
+        qemu_plugin_insn_append(s->plugin_insn, &ret, sizeof(ret));
+    }
+    return ret;
 }
 
 static inline uint16_t x86_lduw_code(CPUX86State *env, DisasContext *s)
 {
-    return cpu_lduw_code(env, advance_pc(env, s, 2));
+    uint16_t ret = cpu_lduw_code(env, advance_pc(env, s, 2));
+
+    if (s->plugin_insn) {
+        qemu_plugin_insn_append(s->plugin_insn, &ret, sizeof(ret));
+    }
+    return ret;
 }
 
 static inline uint32_t x86_ldl_code(CPUX86State *env, DisasContext *s)
 {
-    return cpu_ldl_code(env, advance_pc(env, s, 4));
+    uint32_t ret = cpu_ldl_code(env, advance_pc(env, s, 4));
+
+    if (s->plugin_insn) {
+        qemu_plugin_insn_append(s->plugin_insn, &ret, sizeof(ret));
+    }
+    return ret;
 }
 
 #ifdef TARGET_X86_64
 static inline uint64_t x86_ldq_code(CPUX86State *env, DisasContext *s)
 {
-    return cpu_ldq_code(env, advance_pc(env, s, 8));
+    uint64_t ret = cpu_ldq_code(env, advance_pc(env, s, 8));
+
+    if (s->plugin_insn) {
+        qemu_plugin_insn_append(s->plugin_insn, &ret, sizeof(ret));
+    }
+    return ret;
 }
 #endif
 
@@ -4455,7 +4481,8 @@ static void gen_sse(CPUX86State *env, DisasContext *s, int b,
 
 /* convert one instruction. s->base.is_jmp is set if the translation must
    be stopped. Return the next pc value */
-static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
+static target_ulong disas_insn(DisasContext *s, CPUState *cpu,
+                               struct qemu_plugin_insn *plugin_insn)
 {
     CPUX86State *env = cpu->env_ptr;
     int b, prefixes;
@@ -4465,6 +4492,8 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
     target_ulong next_eip, tval;
     int rex_w, rex_r;
     target_ulong pc_start = s->base.pc_next;
+
+    s->plugin_insn = plugin_insn;
 
     s->pc_start = s->pc = pc_start;
     prefixes = 0;
@@ -8504,10 +8533,10 @@ static bool i386_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cpu,
 }
 
 static void i386_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
-                                   struct qemu_plugin_insn *insn)
+                                   struct qemu_plugin_insn *plugin_insn)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
-    target_ulong pc_next = disas_insn(dc, cpu);
+    target_ulong pc_next = disas_insn(dc, cpu, plugin_insn);
 
     if (dc->tf || (dc->base.tb->flags & HF_INHIBIT_IRQ_MASK)) {
         /* if single step mode, we generate only one instruction and
@@ -8560,6 +8589,20 @@ static void i386_tr_disas_log(const DisasContextBase *dcbase,
     log_target_disas(cpu, dc->base.pc_first, dc->base.tb->size, disas_flags);
 }
 
+static void i386_tr_ctx_copy(void *to, const DisasContextBase *db)
+{
+    DisasContext *dc = container_of(db, DisasContext, base);
+    memcpy(to, dc, sizeof(*dc));
+}
+
+static void i386_tr_ctx_restore(DisasContextBase *db, const void *from)
+{
+    DisasContext *dc = container_of(db, DisasContext, base);
+    const DisasContext *saved_dc = from;
+
+    memcpy(dc, saved_dc, sizeof(*dc));
+}
+
 static const TranslatorOps i386_tr_ops = {
     .init_disas_context = i386_tr_init_disas_context,
     .tb_start           = i386_tr_tb_start,
@@ -8568,6 +8611,9 @@ static const TranslatorOps i386_tr_ops = {
     .translate_insn     = i386_tr_translate_insn,
     .tb_stop            = i386_tr_tb_stop,
     .disas_log          = i386_tr_disas_log,
+    .ctx_copy           = i386_tr_ctx_copy,
+    .ctx_restore        = i386_tr_ctx_restore,
+    .ctx_size           = sizeof(DisasContext),
 };
 
 /* generate intermediate code for basic block 'tb'.  */
