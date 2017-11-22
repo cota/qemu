@@ -58,6 +58,8 @@ enum qemu_plugin_event {
     QEMU_PLUGIN_EV_VCPU_TB_TRANS,
     QEMU_PLUGIN_EV_VCPU_IDLE,
     QEMU_PLUGIN_EV_VCPU_RESUME,
+    QEMU_PLUGIN_EV_VCPU_SYSCALL,
+    QEMU_PLUGIN_EV_VCPU_SYSCALL_RET,
     QEMU_PLUGIN_EV_MAX,
 };
 
@@ -117,6 +119,11 @@ void qemu_plugin_vcpu_idle_cb(CPUState *cpu);
 void qemu_plugin_vcpu_resume_cb(CPUState *cpu);
 void qemu_plugin_vcpu_mem_exec_cb(CPUState *cpu, uint64_t vaddr,
                                   uint8_t size_shift, bool store);
+void
+qemu_plugin_vcpu_syscall(CPUState *cpu, int64_t num, uint64_t a1,
+                         uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5,
+                         uint64_t a6, uint64_t a7, uint64_t a8);
+void qemu_plugin_vcpu_syscall_ret(CPUState *cpu, int64_t num, int64_t ret);
 
 #else /* !CONFIG_PLUGINS */
 
@@ -141,6 +148,15 @@ static inline void qemu_plugin_vcpu_resume_cb(CPUState *cpu)
 
 static inline void qemu_plugin_vcpu_mem_exec_cb(CPUState *cpu, uint64_t vaddr,
                                                 uint8_t size_shift, bool store)
+{ }
+
+static inline void
+qemu_plugin_vcpu_syscall(CPUState *cpu, int64_t num, uint64_t a1, uint64_t a2,
+                         uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6,
+                         uint64_t a7, uint64_t a8)
+{ }
+
+void qemu_plugin_vcpu_syscall_ret(CPUState *cpu, int64_t num, int64_t ret)
 { }
 
 #endif /* !CONFIG_PLUGINS */

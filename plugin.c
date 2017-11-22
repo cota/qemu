@@ -32,6 +32,8 @@ struct qemu_plugin_cb {
         qemu_plugin_vcpu_tb_exec_cb_t    vcpu_tb_exec_cb;
         qemu_plugin_vcpu_tb_trans_cb_t   vcpu_tb_trans_cb;
         qemu_plugin_vcpu_mem_cb_t        vcpu_mem_cb;
+        qemu_plugin_vcpu_syscall_cb_t    vcpu_syscall_cb;
+        qemu_plugin_vcpu_syscall_ret_cb_t vcpu_syscall_ret_cb;
         void *func;
     };
     QLIST_ENTRY(qemu_plugin_cb) entry;
@@ -644,6 +646,54 @@ void qemu_plugin_vcpu_mem_exec_cb(CPUState *cpu, uint64_t vaddr,
 
         func(cb->ctx->id, cpu->cpu_index, vaddr, size_shift, store);
     }
+}
+
+void
+qemu_plugin_vcpu_syscall(CPUState *cpu, int64_t num, uint64_t a1, uint64_t a2,
+                         uint64_t a3, uint64_t a4, uint64_t a5,
+                         uint64_t a6, uint64_t a7, uint64_t a8)
+{
+    struct qemu_plugin_cb *cb, *next;
+    enum qemu_plugin_event ev = QEMU_PLUGIN_EV_VCPU_SYSCALL;
+
+    if (!test_bit(ev, cpu->plugin_mask)) {
+        return;
+    }
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
+        qemu_plugin_vcpu_syscall_cb_t func = cb->vcpu_syscall_cb;
+
+        func(cb->ctx->id, cpu->cpu_index, num, a1, a2, a3, a4, a5, a6, a7, a8);
+    }
+}
+
+void qemu_plugin_register_vcpu_syscall_cb(qemu_plugin_id_t id,
+                                          qemu_plugin_vcpu_syscall_cb_t cb)
+{
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_SYSCALL, cb);
+}
+
+void qemu_plugin_vcpu_syscall_ret(CPUState *cpu, int64_t num, int64_t ret)
+{
+    struct qemu_plugin_cb *cb, *next;
+    enum qemu_plugin_event ev = QEMU_PLUGIN_EV_VCPU_SYSCALL_RET;
+
+    if (!test_bit(ev, cpu->plugin_mask)) {
+        return;
+    }
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
+        qemu_plugin_vcpu_syscall_ret_cb_t func = cb->vcpu_syscall_ret_cb;
+
+        func(cb->ctx->id, cpu->cpu_index, num, ret);
+    }
+}
+
+void
+qemu_plugin_register_vcpu_syscall_ret_cb(qemu_plugin_id_t id,
+                                         qemu_plugin_vcpu_syscall_ret_cb_t cb)
+{
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_SYSCALL_RET, cb);
 }
 
 size_t qemu_plugin_tb_n_insns(const struct qemu_plugin_tb *tb)
