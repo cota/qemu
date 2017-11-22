@@ -22,14 +22,16 @@
 #include "exec/exec-all.h"
 #include "qemu/plugin.h"
 #include "sysemu/sysemu.h"
+#include "tcg/tcg.h"
 
 struct qemu_plugin_cb {
     struct qemu_plugin_ctx *ctx;
     union {
-        qemu_plugin_vcpu_simple_cb_t vcpu_simple_cb;
-        qemu_plugin_vcpu_insn_cb_t vcpu_insn_cb;
-        qemu_plugin_vcpu_tb_exec_cb_t vcpu_tb_exec_cb;
-        qemu_plugin_vcpu_tb_trans_cb_t vcpu_tb_trans_cb;
+        qemu_plugin_vcpu_simple_cb_t     vcpu_simple_cb;
+        qemu_plugin_vcpu_insn_cb_t       vcpu_insn_cb;
+        qemu_plugin_vcpu_tb_exec_cb_t    vcpu_tb_exec_cb;
+        qemu_plugin_vcpu_tb_trans_cb_t   vcpu_tb_trans_cb;
+        qemu_plugin_vcpu_mem_cb_t        vcpu_mem_cb;
         void *func;
     };
     QLIST_ENTRY(qemu_plugin_cb) entry;
@@ -603,6 +605,46 @@ void qemu_plugin_register_vcpu_tb_exec_cb(qemu_plugin_id_t id,
     plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_EXEC, cb);
 }
 #endif
+
+void qemu_plugin_register_vcpu_mem_exec_cb(qemu_plugin_id_t id,
+                                           qemu_plugin_vcpu_mem_cb_t cb)
+{
+    plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_MEM, cb);
+}
+
+void helper_plugin_mem_exec_cb(CPUArchState *env, target_ulong addr,
+                               uint32_t info)
+{
+    struct qemu_plugin_cb *cb, *next;
+    CPUState *cpu = ENV_GET_CPU(env);
+    uint64_t vaddr = addr;
+    uint8_t size_shift = info & MO_SIZE;
+    bool store = !!((info >> 4) & 1);
+    enum qemu_plugin_event ev = QEMU_PLUGIN_EV_VCPU_MEM;
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
+        qemu_plugin_vcpu_mem_cb_t func = cb->vcpu_mem_cb;
+
+        func(cb->ctx->id, cpu->cpu_index, vaddr, size_shift, store);
+    }
+}
+
+void qemu_plugin_vcpu_mem_exec_cb(CPUState *cpu, uint64_t vaddr,
+                                  uint8_t size_shift, bool store)
+{
+    struct qemu_plugin_cb *cb, *next;
+    enum qemu_plugin_event ev = QEMU_PLUGIN_EV_VCPU_MEM;
+
+    if (!test_bit(ev, cpu->plugin_mask)) {
+        return;
+    }
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
+        qemu_plugin_vcpu_mem_cb_t func = cb->vcpu_mem_cb;
+
+        func(cb->ctx->id, cpu->cpu_index, vaddr, size_shift, store);
+    }
+}
 
 size_t qemu_plugin_tb_n_insns(const struct qemu_plugin_tb *tb)
 {

@@ -91,6 +91,7 @@ glue(glue(glue(cpu_ld, USUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
     trace_guest_mem_before_exec(
         ENV_GET_CPU(env), ptr,
         trace_mem_build_info(SHIFT, false, MO_TE, false));
+    qemu_plugin_vcpu_mem_exec_cb(ENV_GET_CPU(env), ptr, SHIFT, false);
 #endif
 
     addr = ptr;
@@ -129,6 +130,7 @@ glue(glue(glue(cpu_lds, SUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
     trace_guest_mem_before_exec(
         ENV_GET_CPU(env), ptr,
         trace_mem_build_info(SHIFT, true, MO_TE, false));
+    qemu_plugin_vcpu_mem_exec_cb(ENV_GET_CPU(env), ptr, SHIFT, false);
 #endif
 
     addr = ptr;
@@ -171,6 +173,7 @@ glue(glue(glue(cpu_st, SUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
     trace_guest_mem_before_exec(
         ENV_GET_CPU(env), ptr,
         trace_mem_build_info(SHIFT, false, MO_TE, true));
+    qemu_plugin_vcpu_mem_exec_cb(ENV_GET_CPU(env), ptr, SHIFT, true);
 #endif
 
     addr = ptr;

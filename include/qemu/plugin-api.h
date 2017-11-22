@@ -8,6 +8,7 @@
 #define QEMU_PLUGIN_API_H
 
 #include <inttypes.h>
+#include <stdbool.h>
 
 /*
  * For best performance, build the plugin with -fvisibility=hidden so that
@@ -119,6 +120,14 @@ typedef void (*qemu_plugin_vcpu_tb_exec_cb_t)(qemu_plugin_id_t id,
 
 void qemu_plugin_register_vcpu_tb_exec_cb(qemu_plugin_id_t id,
                                           qemu_plugin_vcpu_tb_exec_cb_t cb);
+
+typedef void
+(*qemu_plugin_vcpu_mem_cb_t)(qemu_plugin_id_t id, unsigned int vcpu_index,
+                             uint64_t vaddr, uint8_t size_shift,
+                             bool store);
+
+void qemu_plugin_register_vcpu_mem_exec_cb(qemu_plugin_id_t id,
+                                           qemu_plugin_vcpu_mem_cb_t cb);
 
 size_t qemu_plugin_tb_n_insns(const struct qemu_plugin_tb *tb);
 

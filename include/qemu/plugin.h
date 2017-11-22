@@ -54,6 +54,7 @@ enum qemu_plugin_event {
     QEMU_PLUGIN_EV_VCPU_INIT,
     QEMU_PLUGIN_EV_VCPU_EXIT,
     QEMU_PLUGIN_EV_VCPU_INSN,
+    QEMU_PLUGIN_EV_VCPU_MEM,
     QEMU_PLUGIN_EV_VCPU_TB_TRANS,
     QEMU_PLUGIN_EV_VCPU_IDLE,
     QEMU_PLUGIN_EV_VCPU_RESUME,
@@ -114,6 +115,8 @@ void qemu_plugin_tb_trans_cb(CPUState *cpu, struct qemu_plugin_tb *tb);
 void qemu_plugin_tb_remove(struct qemu_plugin_tb *tb);
 void qemu_plugin_vcpu_idle_cb(CPUState *cpu);
 void qemu_plugin_vcpu_resume_cb(CPUState *cpu);
+void qemu_plugin_vcpu_mem_exec_cb(CPUState *cpu, uint64_t vaddr,
+                                  uint8_t size_shift, bool store);
 
 #else /* !CONFIG_PLUGINS */
 
@@ -134,6 +137,10 @@ static inline void qemu_plugin_vcpu_idle_cb(CPUState *cpu)
 { }
 
 static inline void qemu_plugin_vcpu_resume_cb(CPUState *cpu)
+{ }
+
+static inline void qemu_plugin_vcpu_mem_exec_cb(CPUState *cpu, uint64_t vaddr,
+                                                uint8_t size_shift, bool store)
 { }
 
 #endif /* !CONFIG_PLUGINS */

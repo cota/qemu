@@ -7,6 +7,7 @@
   qemu_plugin_register_vcpu_insn_cb;
   qemu_plugin_register_vcpu_tb_trans_cb;
   qemu_plugin_register_vcpu_tb_exec_cb;
+  qemu_plugin_register_vcpu_mem_exec_cb;
   qemu_plugin_tb_n_insns;
   qemu_plugin_tb_get_insn;
   qemu_plugin_insn_data;
