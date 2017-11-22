@@ -1841,8 +1841,6 @@ void qemu_init_vcpu(CPUState *cpu)
     cpu->stopped = true;
     qemu_cond_init(&cpu->cond);
 
-    qemu_plugin_vcpu_init_hook(cpu);
-
     if (!cpu->as) {
         /* If the target cpu hasn't set up any address spaces itself,
          * give it the default one.
