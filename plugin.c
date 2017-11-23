@@ -27,6 +27,7 @@
 struct qemu_plugin_cb {
     struct qemu_plugin_ctx *ctx;
     union {
+        qemu_plugin_simple_cb_t          simple_cb;
         qemu_plugin_vcpu_simple_cb_t     vcpu_simple_cb;
         qemu_plugin_vcpu_insn_cb_t       vcpu_insn_cb;
         qemu_plugin_vcpu_tb_exec_cb_t    vcpu_tb_exec_cb;
@@ -415,6 +416,23 @@ static void plugin_vcpu_cb__simple(CPUState *cpu, enum qemu_plugin_event ev)
     }
 }
 
+static void plugin_cb__simple(enum qemu_plugin_event ev)
+{
+    struct qemu_plugin_cb *cb, *next;
+
+    switch (ev) {
+    case QEMU_PLUGIN_EV_FLUSH:
+        QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
+            qemu_plugin_simple_cb_t func = cb->simple_cb;
+
+            func(cb->ctx->id);
+        }
+        break;
+    default:
+        g_assert_not_reached();
+    }
+}
+
 static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
                                void *func)
 {
@@ -754,6 +772,17 @@ void qemu_plugin_register_vcpu_resume_cb(qemu_plugin_id_t id,
                                          qemu_plugin_vcpu_simple_cb_t cb)
 {
     plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_RESUME, cb);
+}
+
+void qemu_plugin_register_flush_cb(qemu_plugin_id_t id,
+                                   qemu_plugin_simple_cb_t cb)
+{
+    plugin_register_cb(id, QEMU_PLUGIN_EV_FLUSH, cb);
+}
+
+void qemu_plugin_flush_cb(void)
+{
+    plugin_cb__simple(QEMU_PLUGIN_EV_FLUSH);
 }
 
 int qemu_plugin_n_vcpus(void)
