@@ -24,19 +24,21 @@
 #include "sysemu/sysemu.h"
 #include "tcg/tcg.h"
 
+union qemu_plugin_cb_sig {
+    qemu_plugin_simple_cb_t          simple;
+    qemu_plugin_vcpu_simple_cb_t     vcpu_simple;
+    qemu_plugin_vcpu_insn_cb_t       vcpu_insn;
+    qemu_plugin_vcpu_tb_exec_cb_t    vcpu_tb_exec;
+    qemu_plugin_vcpu_tb_trans_cb_t   vcpu_tb_trans;
+    qemu_plugin_vcpu_mem_cb_t        vcpu_mem;
+    qemu_plugin_vcpu_syscall_cb_t    vcpu_syscall;
+    qemu_plugin_vcpu_syscall_ret_cb_t vcpu_syscall_ret;
+    void *generic;
+};
+
 struct qemu_plugin_cb {
     struct qemu_plugin_ctx *ctx;
-    union {
-        qemu_plugin_simple_cb_t          simple_cb;
-        qemu_plugin_vcpu_simple_cb_t     vcpu_simple_cb;
-        qemu_plugin_vcpu_insn_cb_t       vcpu_insn_cb;
-        qemu_plugin_vcpu_tb_exec_cb_t    vcpu_tb_exec_cb;
-        qemu_plugin_vcpu_tb_trans_cb_t   vcpu_tb_trans_cb;
-        qemu_plugin_vcpu_mem_cb_t        vcpu_mem_cb;
-        qemu_plugin_vcpu_syscall_cb_t    vcpu_syscall_cb;
-        qemu_plugin_vcpu_syscall_ret_cb_t vcpu_syscall_ret_cb;
-        void *func;
-    };
+    union qemu_plugin_cb_sig f;
     QLIST_ENTRY(qemu_plugin_cb) entry;
 };
 
@@ -406,7 +408,7 @@ static void plugin_vcpu_cb__simple(CPUState *cpu, enum qemu_plugin_event ev)
     case QEMU_PLUGIN_EV_VCPU_RESUME:
         /* iterate safely; plugins might uninstall themselves at any time */
         QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
-            qemu_plugin_vcpu_simple_cb_t func = cb->vcpu_simple_cb;
+            qemu_plugin_vcpu_simple_cb_t func = cb->f.vcpu_simple;
 
             func(cb->ctx->id, cpu->cpu_index);
         }
@@ -423,7 +425,7 @@ static void plugin_cb__simple(enum qemu_plugin_event ev)
     switch (ev) {
     case QEMU_PLUGIN_EV_FLUSH:
         QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
-            qemu_plugin_simple_cb_t func = cb->simple_cb;
+            qemu_plugin_simple_cb_t func = cb->f.simple;
 
             func(cb->ctx->id);
         }
@@ -448,11 +450,11 @@ static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
         struct qemu_plugin_cb *cb = ctx->callbacks[ev];
 
         if (cb) {
-            cb->func = func;
+            cb->f.generic = func;
         } else {
             cb = g_new(struct qemu_plugin_cb, 1);
             cb->ctx = ctx;
-            cb->func = func;
+            cb->f.generic = func;
             ctx->callbacks[ev] = cb;
             QLIST_INSERT_HEAD_RCU(&plugin.cb_lists[ev], cb, entry);
             if (!test_bit(ev, plugin.mask)) {
@@ -546,7 +548,7 @@ void helper_plugin_insn_cb(CPUArchState *env, void *ptr)
     struct qemu_plugin_cb *cb, *next;
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_INSN], entry, next) {
-        qemu_plugin_vcpu_insn_cb_t func = cb->vcpu_insn_cb;
+        qemu_plugin_vcpu_insn_cb_t func = cb->f.vcpu_insn;
 
         func(cb->ctx->id, cpu->cpu_index, insn->data, insn->size);
     }
@@ -555,7 +557,7 @@ void helper_plugin_insn_cb(CPUArchState *env, void *ptr)
 #if 0
 static void plugin_tb_exec_cb(CPUState *cpu, struct qemu_plugin_cb *cb, const struct qemu_plugin_tb *tb)
 {
-    qemu_plugin_vcpu_tb_exec_cb_t func = cb->vcpu_tb_exec_cb;
+    qemu_plugin_vcpu_tb_exec_cb_t func = cb->f.vcpu_tb_exec;
     struct qemu_plugin_tb_arg *arg;
     struct qemu_plugin_tb utb = {
         .insns = tb->insns,
@@ -591,7 +593,7 @@ void qemu_plugin_tb_trans_cb(CPUState *cpu, struct qemu_plugin_tb *tb)
     struct qemu_plugin_cb *cb, *next;
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_TRANS], entry, next) {
-        qemu_plugin_vcpu_tb_trans_cb_t func = cb->vcpu_tb_trans_cb;
+        qemu_plugin_vcpu_tb_trans_cb_t func = cb->f.vcpu_tb_trans;
         void *userp = NULL;
 
         userp = func(cb->ctx->id, cpu->cpu_index, tb);
@@ -640,7 +642,7 @@ void helper_plugin_mem_exec_cb(CPUArchState *env, target_ulong addr,
     enum qemu_plugin_event ev = QEMU_PLUGIN_EV_VCPU_MEM;
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
-        qemu_plugin_vcpu_mem_cb_t func = cb->vcpu_mem_cb;
+        qemu_plugin_vcpu_mem_cb_t func = cb->f.vcpu_mem;
 
         func(cb->ctx->id, cpu->cpu_index, vaddr, size_shift, store);
     }
@@ -657,7 +659,7 @@ void qemu_plugin_vcpu_mem_exec_cb(CPUState *cpu, uint64_t vaddr,
     }
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
-        qemu_plugin_vcpu_mem_cb_t func = cb->vcpu_mem_cb;
+        qemu_plugin_vcpu_mem_cb_t func = cb->f.vcpu_mem;
 
         func(cb->ctx->id, cpu->cpu_index, vaddr, size_shift, store);
     }
@@ -676,7 +678,7 @@ qemu_plugin_vcpu_syscall(CPUState *cpu, int64_t num, uint64_t a1, uint64_t a2,
     }
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
-        qemu_plugin_vcpu_syscall_cb_t func = cb->vcpu_syscall_cb;
+        qemu_plugin_vcpu_syscall_cb_t func = cb->f.vcpu_syscall;
 
         func(cb->ctx->id, cpu->cpu_index, num, a1, a2, a3, a4, a5, a6, a7, a8);
     }
@@ -698,7 +700,7 @@ void qemu_plugin_vcpu_syscall_ret(CPUState *cpu, int64_t num, int64_t ret)
     }
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
-        qemu_plugin_vcpu_syscall_ret_cb_t func = cb->vcpu_syscall_ret_cb;
+        qemu_plugin_vcpu_syscall_ret_cb_t func = cb->f.vcpu_syscall_ret;
 
         func(cb->ctx->id, cpu->cpu_index, num, ret);
     }
