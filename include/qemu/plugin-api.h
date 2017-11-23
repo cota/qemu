@@ -159,7 +159,6 @@ size_t qemu_plugin_insn_size(const struct qemu_plugin_insn *insn);
  * @cb: callback function
  *
  * The @cb function is called once for each existing vCPU.
- * Note: to avoid deadlock, @cb cannot make any other qemu_plugin_*() call.
  *
  * See also: qemu_plugin_register_vcpu_init_cb()
  */

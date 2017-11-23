@@ -70,8 +70,10 @@ struct qemu_plugin_state {
     /*
      * @lock protects the struct as well as ctx->uninstalling.
      * The lock must be acquired by all API ops.
+     * The lock is recursive, which greatly simplifies things, e.g.
+     * callback registration from qemu_plugin_vcpu_for_each().
      */
-    QemuMutex lock;
+    QemuRecMutex lock;
 };
 
 /*
@@ -105,20 +107,6 @@ QemuOptsList qemu_plugin_opts = {
 typedef int (*qemu_plugin_install_func_t)(qemu_plugin_id_t, int, char **);
 
 static struct qemu_plugin_state plugin;
-static __thread bool plugin_lock_held;
-
-static inline void plugin_lock(void)
-{
-    g_assert(!plugin_lock_held);
-    qemu_mutex_lock(&plugin.lock);
-    plugin_lock_held = true;
-}
-
-static inline void plugin_unlock(void)
-{
-    plugin_lock_held = false;
-    qemu_mutex_unlock(&plugin.lock);
-}
 
 static struct qemu_plugin_desc *plugin_find_desc(struct qemu_plugin_list *head,
                                                  const char *path)
@@ -224,7 +212,7 @@ static int plugin_load(struct qemu_plugin_desc *desc)
         goto err_symbol;
     }
 
-    plugin_lock();
+    qemu_rec_mutex_lock(&plugin.lock);
 
     /* find an unused random id with &ctx as the seed */
     ctx->id = (uint64_t)ctx;
@@ -242,7 +230,7 @@ static int plugin_load(struct qemu_plugin_desc *desc)
         }
     }
     QTAILQ_INSERT_TAIL(&plugin.ctxs, ctx, entry);
-    plugin_unlock();
+    qemu_rec_mutex_unlock(&plugin.lock);
 
     rc = install(ctx->id, desc->argc, desc->argv);
     if (rc) {
@@ -252,11 +240,11 @@ static int plugin_load(struct qemu_plugin_desc *desc)
          * we cannot rely on the plugin doing its own cleanup, so
          * call a full uninstall if the plugin did not already call it.
          */
-        plugin_lock();
+        qemu_rec_mutex_lock(&plugin.lock);
         if (!ctx->uninstalling) {
             qemu_plugin_uninstall(ctx->id, NULL);
         }
-        plugin_unlock();
+        qemu_rec_mutex_unlock(&plugin.lock);
         return 1;
     }
     return 0;
@@ -309,12 +297,11 @@ int qemu_plugin_load_list(struct qemu_plugin_list *head)
     return 0;
 }
 
-static struct qemu_plugin_ctx *id_to_ctx(qemu_plugin_id_t id)
+static struct qemu_plugin_ctx *id_to_ctx__locked(qemu_plugin_id_t id)
 {
     struct qemu_plugin_ctx *ctx;
     qemu_plugin_id_t *id_p;
 
-    g_assert(plugin_lock_held);
     id_p = g_hash_table_lookup(plugin.id_ht, &id);
     ctx = container_of(id_p, struct qemu_plugin_ctx, id);
     if (ctx == NULL) {
@@ -330,12 +317,10 @@ static void plugin_cpu_update__async(CPUState *cpu, run_on_cpu_data data)
     cpu_tb_jmp_cache_clear(cpu);
 }
 
-static void plugin_cpu_update(gpointer k, gpointer v, gpointer udata)
+static void plugin_cpu_update__locked(gpointer k, gpointer v, gpointer udata)
 {
     CPUState *cpu = container_of(k, CPUState, cpu_index);
     run_on_cpu_data mask = RUN_ON_CPU_HOST_ULONG(*plugin.mask);
-
-    g_assert(plugin_lock_held);
 
     if (cpu->created) {
         async_run_on_cpu(cpu, plugin_cpu_update__async, mask);
@@ -344,12 +329,10 @@ static void plugin_cpu_update(gpointer k, gpointer v, gpointer udata)
     }
 }
 
-static void plugin_unregister_cb(struct qemu_plugin_ctx *ctx,
-                                 enum qemu_plugin_event ev)
+static void plugin_unregister_cb__locked(struct qemu_plugin_ctx *ctx,
+                                         enum qemu_plugin_event ev)
 {
     struct qemu_plugin_cb *cb = ctx->callbacks[ev];
-
-    g_assert(plugin_lock_held);
 
     if (cb == NULL) {
         return;
@@ -359,7 +342,7 @@ static void plugin_unregister_cb(struct qemu_plugin_ctx *ctx,
     ctx->callbacks[ev] = NULL;
     if (QLIST_EMPTY_RCU(&plugin.cb_lists[ev])) {
         clear_bit(ev, plugin.mask);
-        g_hash_table_foreach(plugin.cpu_ht, plugin_cpu_update, NULL);
+        g_hash_table_foreach(plugin.cpu_ht, plugin_cpu_update__locked, NULL);
     }
 }
 
@@ -367,13 +350,13 @@ static void plugin_destroy__rcuthread(struct qemu_plugin_ctx *ctx)
 {
     bool success;
 
-    plugin_lock();
+    qemu_rec_mutex_lock(&plugin.lock);
     g_assert(ctx->uninstalling);
     success = g_hash_table_remove(plugin.id_ht, &ctx->id);
     g_assert(success);
 
     QTAILQ_REMOVE(&plugin.ctxs, ctx, entry);
-    plugin_unlock();
+    qemu_rec_mutex_unlock(&plugin.lock);
 
     if (ctx->uninstall_cb) {
         ctx->uninstall_cb(ctx->id);
@@ -389,8 +372,8 @@ void qemu_plugin_uninstall(qemu_plugin_id_t id, qemu_plugin_uninstall_cb_t cb)
     struct qemu_plugin_ctx *ctx;
     enum qemu_plugin_event ev;
 
-    plugin_lock();
-    ctx = id_to_ctx(id);
+    qemu_rec_mutex_lock(&plugin.lock);
+    ctx = id_to_ctx__locked(id);
     if (unlikely(ctx->uninstalling)) {
         error_report("plugin: called %s more than once", __func__);
         abort();
@@ -403,9 +386,9 @@ void qemu_plugin_uninstall(qemu_plugin_id_t id, qemu_plugin_uninstall_cb_t cb)
      * we cannot yet uninstall the plugin.
      */
     for (ev = 0; ev < QEMU_PLUGIN_EV_MAX; ev++) {
-        plugin_unregister_cb(ctx, ev);
+        plugin_unregister_cb__locked(ctx, ev);
     }
-    plugin_unlock();
+    qemu_rec_mutex_unlock(&plugin.lock);
 
     /* TODO: kick all vCPUs to make sure the RCU grace period completes ASAP */
     call_rcu(ctx, plugin_destroy__rcuthread, rcu);
@@ -437,8 +420,8 @@ static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
 {
     struct qemu_plugin_ctx *ctx;
 
-    plugin_lock();
-    ctx = id_to_ctx(id);
+    qemu_rec_mutex_lock(&plugin.lock);
+    ctx = id_to_ctx__locked(id);
     /* if the plugin is on its way out, ignore this request */
     if (unlikely(ctx->uninstalling)) {
         goto out_unlock;
@@ -456,14 +439,15 @@ static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
             QLIST_INSERT_HEAD_RCU(&plugin.cb_lists[ev], cb, entry);
             if (!test_bit(ev, plugin.mask)) {
                 set_bit(ev, plugin.mask);
-                g_hash_table_foreach(plugin.cpu_ht, plugin_cpu_update, NULL);
+                g_hash_table_foreach(plugin.cpu_ht, plugin_cpu_update__locked,
+                                     NULL);
             }
         }
     } else {
-        plugin_unregister_cb(ctx, ev);
+        plugin_unregister_cb__locked(ctx, ev);
     }
  out_unlock:
-    plugin_unlock();
+    qemu_rec_mutex_unlock(&plugin.lock);
 }
 
 void qemu_plugin_register_vcpu_init_cb(qemu_plugin_id_t id,
@@ -487,12 +471,12 @@ void qemu_plugin_vcpu_init_hook(CPUState *cpu)
 {
     bool success;
 
-    plugin_lock();
-    plugin_cpu_update(&cpu->cpu_index, NULL, NULL);
+    qemu_rec_mutex_lock(&plugin.lock);
+    plugin_cpu_update__locked(&cpu->cpu_index, NULL, NULL);
     success = g_hash_table_insert(plugin.cpu_ht, &cpu->cpu_index,
                                   &cpu->cpu_index);
     g_assert(success);
-    plugin_unlock();
+    qemu_rec_mutex_unlock(&plugin.lock);
 
     plugin_vcpu_cb__simple(cpu, QEMU_PLUGIN_EV_VCPU_INIT);
 }
@@ -503,10 +487,10 @@ void qemu_plugin_vcpu_exit_hook(CPUState *cpu)
 
     plugin_vcpu_cb__simple(cpu, QEMU_PLUGIN_EV_VCPU_EXIT);
 
-    plugin_lock();
+    qemu_rec_mutex_lock(&plugin.lock);
     success = g_hash_table_remove(plugin.cpu_ht, &cpu->cpu_index);
     g_assert(success);
-    plugin_unlock();
+    qemu_rec_mutex_unlock(&plugin.lock);
 }
 
 struct plugin_for_each_args {
@@ -530,11 +514,11 @@ void qemu_plugin_vcpu_for_each(qemu_plugin_id_t id,
     if (cb == NULL) {
         return;
     }
-    plugin_lock();
-    args.ctx = id_to_ctx(id);
+    qemu_rec_mutex_lock(&plugin.lock);
+    args.ctx = id_to_ctx__locked(id);
     args.cb = cb;
     g_hash_table_foreach(plugin.cpu_ht, plugin_vcpu_for_each, &args);
-    plugin_unlock();
+    qemu_rec_mutex_unlock(&plugin.lock);
 }
 
 void helper_plugin_insn_cb(CPUArchState *env, void *ptr)
