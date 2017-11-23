@@ -48,20 +48,19 @@ typedef uint64_t qemu_plugin_id_t;
 QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, int argc,
                                            char **argv);
 
+typedef void (*qemu_plugin_uninstall_cb_t)(qemu_plugin_id_t id);
+
 /**
  * qemu_plugin_uninstall - Uninstall a plugin
  * @id: this plugin's opaque ID
+ * @cb: callback to be called once the plugin has been removed
  *
- * Removes all callbacks and unloads the plugin.
- *
- * Once this function returns, no further API calls from it are allowed.
- *
- * Note: if the plugin is multi-threaded (e.g. it is subscribed to callbacks
- * from vCPUs running in parallel), some time will elapse before changes
- * propagate to all threads, and therefore some callbacks might still be called
- * for a short period of time after this function returns.
+ * Do NOT assume that the plugin has been uninstalled once this
+ * function returns. Plugins are uninstalled asynchronously,
+ * and therefore the given plugin might still receive callbacks
+ * from prior subscriptions _until_ @cb is called.
  */
-void qemu_plugin_uninstall(qemu_plugin_id_t id);
+void qemu_plugin_uninstall(qemu_plugin_id_t id, qemu_plugin_uninstall_cb_t cb);
 
 typedef void (*qemu_plugin_vcpu_simple_cb_t)(qemu_plugin_id_t id,
                                              unsigned int vcpu_index);

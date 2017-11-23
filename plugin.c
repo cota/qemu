@@ -48,6 +48,7 @@ struct qemu_plugin_ctx {
     qemu_plugin_id_t id;
     struct qemu_plugin_cb *callbacks[QEMU_PLUGIN_EV_MAX];
     QTAILQ_ENTRY(qemu_plugin_ctx) entry;
+    qemu_plugin_uninstall_cb_t uninstall_cb;
     bool uninstalling; /* protected by plugin.lock */
 };
 
@@ -253,7 +254,7 @@ static int plugin_load(struct qemu_plugin_desc *desc)
          */
         plugin_lock();
         if (!ctx->uninstalling) {
-            qemu_plugin_uninstall(ctx->id);
+            qemu_plugin_uninstall(ctx->id, NULL);
         }
         plugin_unlock();
         return 1;
@@ -364,22 +365,29 @@ static void plugin_unregister_cb(struct qemu_plugin_ctx *ctx,
 
 static void plugin_destroy__rcuthread(struct qemu_plugin_ctx *ctx)
 {
+    bool success;
+
     plugin_lock();
-    QTAILQ_REMOVE(&plugin.ctxs, ctx, entry);
     g_assert(ctx->uninstalling);
+    success = g_hash_table_remove(plugin.id_ht, &ctx->id);
+    g_assert(success);
+
+    QTAILQ_REMOVE(&plugin.ctxs, ctx, entry);
     plugin_unlock();
 
+    if (ctx->uninstall_cb) {
+        ctx->uninstall_cb(ctx->id);
+    }
     if (dlclose(ctx->handle)) {
         warn_report("%s: %s", __func__, dlerror());
     }
     qemu_vfree(ctx);
 }
 
-void qemu_plugin_uninstall(qemu_plugin_id_t id)
+void qemu_plugin_uninstall(qemu_plugin_id_t id, qemu_plugin_uninstall_cb_t cb)
 {
     struct qemu_plugin_ctx *ctx;
     enum qemu_plugin_event ev;
-    bool success;
 
     plugin_lock();
     ctx = id_to_ctx(id);
@@ -388,18 +396,18 @@ void qemu_plugin_uninstall(qemu_plugin_id_t id)
         abort();
     }
     ctx->uninstalling = true;
+    ctx->uninstall_cb = cb;
     /*
      * Unregister all callbacks. This is an RCU list so it is possible that some
      * callbacks will still be called in this RCU grace period. For this reason
-     * we cannot yet free the context nor invalidate its id.
+     * we cannot yet uninstall the plugin.
      */
     for (ev = 0; ev < QEMU_PLUGIN_EV_MAX; ev++) {
         plugin_unregister_cb(ctx, ev);
     }
-    success = g_hash_table_remove(plugin.id_ht, &ctx->id);
-    g_assert(success);
     plugin_unlock();
 
+    /* TODO: kick all vCPUs to make sure the RCU grace period completes ASAP */
     call_rcu(ctx, plugin_destroy__rcuthread, rcu);
 }
 
@@ -431,6 +439,10 @@ static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
 
     plugin_lock();
     ctx = id_to_ctx(id);
+    /* if the plugin is on its way out, ignore this request */
+    if (unlikely(ctx->uninstalling)) {
+        goto out_unlock;
+    }
     if (func) {
         struct qemu_plugin_cb *cb = ctx->callbacks[ev];
 
@@ -450,6 +462,7 @@ static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
     } else {
         plugin_unregister_cb(ctx, ev);
     }
+ out_unlock:
     plugin_unlock();
 }
 
