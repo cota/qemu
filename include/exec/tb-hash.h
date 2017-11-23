@@ -62,8 +62,8 @@ uint32_t tb_hash_func(tb_page_addr_t phys_pc, target_ulong pc, uint32_t flags,
                       uint32_t cf_mask, uint32_t trace_vcpu_dstate,
                       uint32_t plugin_mask)
 {
-    return tb_hash_func8(phys_pc, pc, flags, cf_mask, trace_vcpu_dstate,
-                         plugin_mask);
+    return tb_hash_xx8(phys_pc, pc, flags, cf_mask, trace_vcpu_dstate,
+                       plugin_mask);
 }
 
 #endif

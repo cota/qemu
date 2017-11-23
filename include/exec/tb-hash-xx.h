@@ -49,17 +49,17 @@
  * contiguous in memory.
  */
 static inline uint32_t
-tb_hash_func8(uint64_t a0, uint64_t b0, uint32_t e, uint32_t f, uint32_t g,
-              uint32_t h)
+tb_hash_xx8(uint64_t ab, uint64_t cd, uint32_t e, uint32_t f, uint32_t g,
+            uint32_t h)
 {
     uint32_t v1 = TB_HASH_XX_SEED + PRIME32_1 + PRIME32_2;
     uint32_t v2 = TB_HASH_XX_SEED + PRIME32_2;
     uint32_t v3 = TB_HASH_XX_SEED + 0;
     uint32_t v4 = TB_HASH_XX_SEED - PRIME32_1;
-    uint32_t a = a0 >> 32;
-    uint32_t b = a0;
-    uint32_t c = b0 >> 32;
-    uint32_t d = b0;
+    uint32_t a = ab >> 32;
+    uint32_t b = ab;
+    uint32_t c = cd >> 32;
+    uint32_t d = cd;
     uint32_t h32;
 
     v1 += a * PRIME32_2;
@@ -104,6 +104,16 @@ tb_hash_func8(uint64_t a0, uint64_t b0, uint32_t e, uint32_t f, uint32_t g,
     h32 ^= h32 >> 16;
 
     return h32;
+}
+
+static inline uint32_t tb_hash_xx1(uint64_t ab)
+{
+    return tb_hash_xx8(ab, 0, 0, 0, 0, 0);
+}
+
+static inline uint32_t tb_hash_xx4(uint64_t ab, uint64_t cd, uint32_t e, uint32_t f)
+{
+    return tb_hash_xx8(ab, cd, e, f, 0, 0);
 }
 
 #endif /* EXEC_TB_HASH_XX_H */

@@ -113,13 +113,13 @@ static const char * const qsp_typenames[] = {
  * without it we still get a pretty unique hash.
  */
 static inline
-uint32_t do_qsp_callsite_hash(const struct qsp_callsite *callsite, uint64_t a)
+uint32_t do_qsp_callsite_hash(const struct qsp_callsite *callsite, uint64_t ab)
 {
-    uint64_t b = (uint64_t)callsite->obj;
+    uint64_t cd = (uint64_t)callsite->obj;
     uint32_t e = callsite->line;
     uint32_t f = callsite->type;
 
-    return tb_hash_func8(a, b, e, f, 0, 0);
+    return tb_hash_xx4(ab, cd, e, f);
 }
 
 static inline
