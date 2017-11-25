@@ -26,6 +26,7 @@
 
 union qemu_plugin_cb_sig {
     qemu_plugin_simple_cb_t          simple;
+    qemu_plugin_udata_cb_t           udata;
     qemu_plugin_vcpu_simple_cb_t     vcpu_simple;
     qemu_plugin_vcpu_udata_cb_t      vcpu_udata;
     qemu_plugin_vcpu_tb_trans_cb_t   vcpu_tb_trans;
@@ -38,6 +39,7 @@ union qemu_plugin_cb_sig {
 struct qemu_plugin_cb {
     struct qemu_plugin_ctx *ctx;
     union qemu_plugin_cb_sig f;
+    void *udata;
     QLIST_ENTRY(qemu_plugin_cb) entry;
 };
 
@@ -457,8 +459,25 @@ static void plugin_cb__simple(enum qemu_plugin_event ev)
     }
 }
 
-static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
-                               void *func)
+static void plugin_cb__udata(enum qemu_plugin_event ev)
+{
+    struct qemu_plugin_cb *cb, *next;
+
+    switch (ev) {
+    case QEMU_PLUGIN_EV_ATEXIT:
+        QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[ev], entry, next) {
+            qemu_plugin_udata_cb_t func = cb->f.udata;
+
+            func(cb->ctx->id, cb->udata);
+        }
+        break;
+    default:
+        g_assert_not_reached();
+    }
+}
+
+static void do_plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
+                               void *func, void *udata)
 {
     struct qemu_plugin_ctx *ctx;
 
@@ -473,10 +492,12 @@ static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
 
         if (cb) {
             cb->f.generic = func;
+            cb->udata = udata;
         } else {
             cb = g_new(struct qemu_plugin_cb, 1);
             cb->ctx = ctx;
             cb->f.generic = func;
+            cb->udata = udata;
             ctx->callbacks[ev] = cb;
             QLIST_INSERT_HEAD_RCU(&plugin.cb_lists[ev], cb, entry);
             if (!test_bit(ev, plugin.mask)) {
@@ -490,6 +511,18 @@ static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
     }
  out_unlock:
     qemu_rec_mutex_unlock(&plugin.lock);
+}
+
+static void plugin_register_cb(qemu_plugin_id_t id, enum qemu_plugin_event ev,
+                               void *func)
+{
+    do_plugin_register_cb(id, ev, func, NULL);
+}
+
+static void plugin_register_cb_udata(qemu_plugin_id_t id, enum qemu_plugin_event ev,
+                                     void *func, void *udata)
+{
+    do_plugin_register_cb(id, ev, func, udata);
 }
 
 void qemu_plugin_register_vcpu_init_cb(qemu_plugin_id_t id,
@@ -845,6 +878,18 @@ int qemu_plugin_n_max_vcpus(void)
 #endif
 }
 
+void qemu_plugin_atexit_cb(void)
+{
+    plugin_cb__udata(QEMU_PLUGIN_EV_ATEXIT);
+}
+
+void qemu_plugin_register_atexit_cb(qemu_plugin_id_t id,
+                                    qemu_plugin_udata_cb_t cb,
+                                    void *udata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_ATEXIT, cb, udata);
+}
+
 static void __attribute__((__constructor__)) plugin_init(void)
 {
     int i;
@@ -857,4 +902,5 @@ static void __attribute__((__constructor__)) plugin_init(void)
     plugin.cpu_ht = g_hash_table_new(g_int_hash, g_int_equal);
     QTAILQ_INIT(&plugin.ctxs);
     qht_init(&plugin.dyn_cb_ht, dyn_cb_cmp, 1024, QHT_MODE_AUTO_RESIZE);
+    atexit(qemu_plugin_atexit_cb);
 }

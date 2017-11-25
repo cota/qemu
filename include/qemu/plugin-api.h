@@ -64,6 +64,8 @@ void qemu_plugin_uninstall(qemu_plugin_id_t id, qemu_plugin_uninstall_cb_t cb);
 
 typedef void (*qemu_plugin_simple_cb_t)(qemu_plugin_id_t id);
 
+typedef void (*qemu_plugin_udata_cb_t)(qemu_plugin_id_t id, void *userdata);
+
 typedef void (*qemu_plugin_vcpu_simple_cb_t)(qemu_plugin_id_t id,
                                              unsigned int vcpu_index);
 
@@ -174,6 +176,9 @@ void qemu_plugin_vcpu_for_each(qemu_plugin_id_t id,
 
 void qemu_plugin_register_flush_cb(qemu_plugin_id_t id,
                                    qemu_plugin_simple_cb_t cb);
+
+void qemu_plugin_register_atexit_cb(qemu_plugin_id_t id,
+                                    qemu_plugin_udata_cb_t cb, void *userdata);
 
 /* returns -1 in user-mode */
 int qemu_plugin_n_vcpus(void);

@@ -60,6 +60,7 @@ enum qemu_plugin_event {
     QEMU_PLUGIN_EV_VCPU_SYSCALL,
     QEMU_PLUGIN_EV_VCPU_SYSCALL_RET,
     QEMU_PLUGIN_EV_FLUSH,
+    QEMU_PLUGIN_EV_ATEXIT,
     QEMU_PLUGIN_EV_MAX,
 };
 
@@ -126,6 +127,8 @@ void qemu_plugin_vcpu_syscall_ret(CPUState *cpu, int64_t num, int64_t ret);
 
 void qemu_plugin_flush_cb(void);
 
+void qemu_plugin_atexit_cb(void);
+
 #else /* !CONFIG_PLUGINS */
 
 static inline void qemu_plugin_vcpu_init_hook(CPUState *cpu)
@@ -159,6 +162,9 @@ void qemu_plugin_vcpu_syscall_ret(CPUState *cpu, int64_t num, int64_t ret)
 { }
 
 static inline void qemu_plugin_flush_cb(void)
+{ }
+
+static inline void qemu_plugin_atexit_cb(void)
 { }
 
 #endif /* !CONFIG_PLUGINS */
