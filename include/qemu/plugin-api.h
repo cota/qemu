@@ -67,6 +67,10 @@ typedef void (*qemu_plugin_simple_cb_t)(qemu_plugin_id_t id);
 typedef void (*qemu_plugin_vcpu_simple_cb_t)(qemu_plugin_id_t id,
                                              unsigned int vcpu_index);
 
+typedef void (*qemu_plugin_vcpu_udata_cb_t)(qemu_plugin_id_t id,
+                                            unsigned int vcpu_index,
+                                            void *userdata);
+
 /**
  * qemu_plugin_register_vcpu_init_cb - register a vCPU initialization callback
  * @id: plugin ID
@@ -97,30 +101,26 @@ void qemu_plugin_register_vcpu_idle_cb(qemu_plugin_id_t id,
 void qemu_plugin_register_vcpu_resume_cb(qemu_plugin_id_t id,
                                          qemu_plugin_vcpu_simple_cb_t cb);
 
-typedef void (*qemu_plugin_vcpu_insn_cb_t)(qemu_plugin_id_t id,
-                                           unsigned int vcpu_index,
-                                           const void *insn, size_t size);
-
-void qemu_plugin_register_vcpu_insn_cb(qemu_plugin_id_t id,
-                                       qemu_plugin_vcpu_insn_cb_t cb);
-
 struct qemu_plugin_tb;
 struct qemu_plugin_insn;
 
-typedef void *(*qemu_plugin_vcpu_tb_trans_cb_t)(qemu_plugin_id_t id,
-                                                unsigned int vcpu_index,
-                                                const struct qemu_plugin_tb *tb);
+typedef void (*qemu_plugin_vcpu_tb_trans_cb_t)(qemu_plugin_id_t id,
+                                               unsigned int vcpu_index,
+                                               struct qemu_plugin_tb *tb);
 
 void qemu_plugin_register_vcpu_tb_trans_cb(qemu_plugin_id_t id,
                                            qemu_plugin_vcpu_tb_trans_cb_t cb);
 
-typedef void (*qemu_plugin_vcpu_tb_exec_cb_t)(qemu_plugin_id_t id,
-                                              unsigned int vcpu_index,
-                                              const struct qemu_plugin_tb *tb,
-                                              void *udata);
-
+/* can only call from tb_trans_cb callback */
 void qemu_plugin_register_vcpu_tb_exec_cb(qemu_plugin_id_t id,
-                                          qemu_plugin_vcpu_tb_exec_cb_t cb);
+                                          struct qemu_plugin_tb *tb,
+                                          qemu_plugin_vcpu_udata_cb_t cb,
+                                          void *userdata);
+
+void qemu_plugin_register_vcpu_insn_exec_cb(qemu_plugin_id_t id,
+                                            struct qemu_plugin_insn *insn,
+                                            qemu_plugin_vcpu_udata_cb_t cb,
+                                            void *userdata);
 
 typedef void
 (*qemu_plugin_vcpu_mem_cb_t)(qemu_plugin_id_t id, unsigned int vcpu_index,
@@ -149,11 +149,16 @@ qemu_plugin_register_vcpu_syscall_ret_cb(qemu_plugin_id_t id,
 
 size_t qemu_plugin_tb_n_insns(const struct qemu_plugin_tb *tb);
 
-const struct qemu_plugin_insn *qemu_plugin_tb_get_insn(const struct qemu_plugin_tb *tb, size_t idx);
+uint64_t qemu_plugin_tb_vaddr(const struct qemu_plugin_tb *tb);
+
+struct qemu_plugin_insn *
+qemu_plugin_tb_get_insn(const struct qemu_plugin_tb *tb, size_t idx);
 
 const void *qemu_plugin_insn_data(const struct qemu_plugin_insn *insn);
 
 size_t qemu_plugin_insn_size(const struct qemu_plugin_insn *insn);
+
+uint64_t qemu_plugin_insn_vaddr(const struct qemu_plugin_insn *insn);
 
 /**
  * qemu_plugin_vcpu_for_each - iterate over the existing vCPU
@@ -175,7 +180,5 @@ int qemu_plugin_n_vcpus(void);
 
 /* returns -1 in user-mode */
 int qemu_plugin_n_max_vcpus(void);
-
-typedef void (*qemu_plugin_insn_cb_t)(qemu_plugin_id_t id, unsigned int vcpu_index, uint8_t *insn, size_t size);
 
 #endif /* QEMU_PLUGIN_API_H */

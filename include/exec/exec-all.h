@@ -397,7 +397,6 @@ struct TranslationBlock {
     uintptr_t jmp_list_head;
     uintptr_t jmp_list_next[2];
     uintptr_t jmp_dest[2];
-    struct qemu_plugin_tb *plugin_tb;
 };
 
 extern bool parallel_cpus;

@@ -4,7 +4,7 @@
   qemu_plugin_register_vcpu_exit_cb;
   qemu_plugin_register_vcpu_idle_cb;
   qemu_plugin_register_vcpu_resume_cb;
-  qemu_plugin_register_vcpu_insn_cb;
+  qemu_plugin_register_vcpu_insn_exec_cb;
   qemu_plugin_register_vcpu_tb_trans_cb;
   qemu_plugin_register_vcpu_tb_exec_cb;
   qemu_plugin_register_flush_cb;
@@ -13,8 +13,10 @@
   qemu_plugin_register_vcpu_syscall_ret_cb;
   qemu_plugin_tb_n_insns;
   qemu_plugin_tb_get_insn;
+  qemu_plugin_tb_vaddr;
   qemu_plugin_insn_data;
   qemu_plugin_insn_size;
+  qemu_plugin_insn_vaddr;
   qemu_plugin_vcpu_for_each;
   qemu_plugin_n_vcpus;
   qemu_plugin_n_max_vcpus;

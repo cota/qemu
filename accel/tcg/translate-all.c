@@ -59,7 +59,6 @@
 #include "qemu/main-loop.h"
 #include "exec/log.h"
 #include "sysemu/cpus.h"
-#include "qemu/plugin.h"
 
 /* #define DEBUG_TB_INVALIDATE */
 /* #define DEBUG_TB_FLUSH */
@@ -1585,7 +1584,6 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->cflags = cflags;
     tb->trace_vcpu_dstate = *cpu->trace_dstate;
     tb->plugin_mask = *cpu->plugin_mask;
-    tb->plugin_tb = NULL;
 
 #ifdef CONFIG_PROFILER
     /* includes aborted translations because of exceptions */

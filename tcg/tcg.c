@@ -380,14 +380,6 @@ void tcg_tb_insert(TranslationBlock *tb)
     qemu_mutex_unlock(&rt->lock);
 }
 
-static gboolean tb_plugin_remove(gpointer k, gpointer v, gpointer d)
-{
-    TranslationBlock *tb = v;
-
-    qemu_plugin_tb_remove(tb->plugin_tb);
-    return FALSE;
-}
-
 void tcg_tb_remove(TranslationBlock *tb)
 {
     struct tcg_region_tree *rt = tc_ptr_to_region_tree(tb->tc.ptr);
@@ -395,8 +387,6 @@ void tcg_tb_remove(TranslationBlock *tb)
     qemu_mutex_lock(&rt->lock);
     g_tree_remove(rt->tree, &tb->tc);
     qemu_mutex_unlock(&rt->lock);
-
-    qemu_plugin_tb_remove(tb->plugin_tb);
 }
 
 /*
@@ -473,9 +463,6 @@ static void tcg_region_tree_reset_all(void)
     tcg_region_tree_lock_all();
     for (i = 0; i < region.n; i++) {
         struct tcg_region_tree *rt = region_trees + i * tree_size;
-
-        /* remove all plugin data from the TB */
-        g_tree_foreach(rt->tree, tb_plugin_remove, NULL);
 
         /* Increment the refcount first so that destroy acts as a reset */
         g_tree_ref(rt->tree);
