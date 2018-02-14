@@ -44,6 +44,7 @@ static TCGv load_val;
 typedef struct DisasContext {
     DisasContextBase base;
     target_ulong pc;
+    target_ulong next_page_start;
     uint32_t opcode;
     uint32_t flags;
     uint32_t mem_idx;
@@ -1827,78 +1828,71 @@ static void decode_opc(CPURISCVState *env, DisasContext *ctx)
     }
 }
 
-void gen_intermediate_code(CPUState *cs, TranslationBlock *tb)
+static int riscv_tr_init_disas_context(DisasContextBase *dcbase,
+                                       CPUState *cs, int max_insns)
 {
-    CPURISCVState *env = cs->env_ptr;
-    DisasContext ctx;
-    target_ulong next_page_start;
-    int num_insns;
-    int max_insns;
 
-    ctx.base.pc_first = tb->pc;
-    ctx.base.pc_next = ctx.base.pc_first;
-    /* once we have GDB, the rest of the translate.c implementation should be
-       ready for singlestep */
-    ctx.base.singlestep_enabled = cs->singlestep_enabled;
-    ctx.base.tb = tb;
-    ctx.base.is_jmp = DISAS_NEXT;
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
 
-    next_page_start = (ctx.base.pc_first & TARGET_PAGE_MASK) + TARGET_PAGE_SIZE;
-    ctx.pc = ctx.base.pc_first;
-    ctx.flags = tb->flags;
-    ctx.mem_idx = tb->flags & TB_FLAGS_MMU_MASK;
-    ctx.frm = -1;  /* unknown rounding mode */
+    ctx->next_page_start = (ctx->base.pc_first & TARGET_PAGE_MASK) +
+        TARGET_PAGE_SIZE;
+    ctx->pc = ctx->base.pc_first;
+    ctx->flags = ctx->base.tb->flags;
+    ctx->mem_idx = ctx->base.tb->flags & TB_FLAGS_MMU_MASK;
+    ctx->frm = -1;  /* unknown rounding mode */
+    return max_insns;
+}
 
-    num_insns = 0;
-    max_insns = tb_cflags(ctx.base.tb) & CF_COUNT_MASK;
-    if (max_insns == 0) {
-        max_insns = CF_COUNT_MASK;
+static void riscv_tr_tb_start(DisasContextBase *db, CPUState *cpu)
+{ }
+
+
+static void riscv_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
+{
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
+
+    tcg_gen_insn_start(ctx->pc);
+}
+
+static bool riscv_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cpu,
+                                      const CPUBreakpoint *bp)
+{
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
+
+    tcg_gen_movi_tl(cpu_pc, ctx->pc);
+    ctx->base.is_jmp = DISAS_NORETURN;
+    gen_exception_debug();
+    /* The address covered by the breakpoint must be included in
+       [tb->pc, tb->pc + tb->size) in order to for it to be
+       properly cleared -- thus we increment the PC here so that
+       the logic setting tb->size below does the right thing.  */
+    ctx->pc += 4;
+    return true;
+}
+
+static void riscv_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+{
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
+    CPURISCVState *env = cpu->env_ptr;
+
+    ctx->opcode = cpu_ldl_code(env, ctx->pc);
+    decode_opc(env, ctx);
+    ctx->pc = ctx->base.pc_next;
+
+    if (ctx->base.is_jmp == DISAS_NEXT &&
+        ctx->pc >= ctx->next_page_start) {
+        ctx->base.is_jmp = DISAS_TOO_MANY;
     }
-    if (max_insns > TCG_MAX_INSNS) {
-        max_insns = TCG_MAX_INSNS;
-    }
-    gen_tb_start(tb);
+}
 
-    while (ctx.base.is_jmp == DISAS_NEXT) {
-        tcg_gen_insn_start(ctx.pc);
-        num_insns++;
+static void riscv_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
+{
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
 
-        if (unlikely(cpu_breakpoint_test(cs, ctx.pc, BP_ANY))) {
-            tcg_gen_movi_tl(cpu_pc, ctx.pc);
-            ctx.base.is_jmp = DISAS_NORETURN;
-            gen_exception_debug();
-            /* The address covered by the breakpoint must be included in
-               [tb->pc, tb->pc + tb->size) in order to for it to be
-               properly cleared -- thus we increment the PC here so that
-               the logic setting tb->size below does the right thing.  */
-            ctx.pc += 4;
-            goto done_generating;
-        }
-
-        if (num_insns == max_insns && (tb_cflags(ctx.base.tb) & CF_LAST_IO)) {
-            gen_io_start();
-        }
-
-        ctx.opcode = cpu_ldl_code(env, ctx.pc);
-        decode_opc(env, &ctx);
-        ctx.pc = ctx.base.pc_next;
-
-        if (ctx.base.is_jmp == DISAS_NEXT &&
-            (cs->singlestep_enabled ||
-             ctx.pc >= next_page_start ||
-             tcg_op_buf_full() ||
-             num_insns >= max_insns ||
-             singlestep)) {
-            ctx.base.is_jmp = DISAS_TOO_MANY;
-        }
-    }
-    if (tb_cflags(ctx.base.tb) & CF_LAST_IO) {
-        gen_io_end();
-    }
-    switch (ctx.base.is_jmp) {
+    switch (ctx->base.is_jmp) {
     case DISAS_TOO_MANY:
-        tcg_gen_movi_tl(cpu_pc, ctx.pc);
-        if (cs->singlestep_enabled) {
+        tcg_gen_movi_tl(cpu_pc, ctx->pc);
+        if (ctx->base.singlestep_enabled) {
             gen_exception_debug();
         } else {
             tcg_gen_exit_tb(0);
@@ -1909,19 +1903,29 @@ void gen_intermediate_code(CPUState *cs, TranslationBlock *tb)
     default:
         g_assert_not_reached();
     }
-done_generating:
-    gen_tb_end(tb, num_insns);
-    tb->size = ctx.pc - ctx.base.pc_first;
-    tb->icount = num_insns;
+}
 
-#ifdef DEBUG_DISAS
-    if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
-        && qemu_log_in_addr_range(ctx.base.pc_first)) {
-        qemu_log("IN: %s\n", lookup_symbol(ctx.base.pc_first));
-        log_target_disas(cs, ctx.base.pc_first, ctx.pc - ctx.base.pc_first);
-        qemu_log("\n");
-    }
-#endif
+static void riscv_tr_disas_log(const DisasContextBase *dcbase, CPUState *cpu)
+{
+    qemu_log("IN: %s\n", lookup_symbol(dcbase->pc_first));
+    log_target_disas(cpu, dcbase->pc_first, dcbase->tb->size);
+}
+
+static const TranslatorOps riscv_tr_ops = {
+    .init_disas_context = riscv_tr_init_disas_context,
+    .tb_start           = riscv_tr_tb_start,
+    .insn_start         = riscv_tr_insn_start,
+    .breakpoint_check   = riscv_tr_breakpoint_check,
+    .translate_insn     = riscv_tr_translate_insn,
+    .tb_stop            = riscv_tr_tb_stop,
+    .disas_log          = riscv_tr_disas_log,
+};
+
+void gen_intermediate_code(CPUState *cs, TranslationBlock *tb)
+{
+    DisasContext ctx;
+
+    translator_loop(&riscv_tr_ops, &ctx.base, cs, tb);
 }
 
 void riscv_translate_init(void)
