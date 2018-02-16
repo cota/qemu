@@ -7277,8 +7277,9 @@ static int ppc_tr_init_disas_context(DisasContextBase *dcbase,
     return MIN(max_insns, bound);
 }
 
-static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
+static int ppc_tr_tb_start(DisasContextBase *db, CPUState *cs, int max_insns)
 {
+    return max_insns;
 }
 
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
