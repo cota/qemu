@@ -5765,8 +5765,9 @@ static int sparc_tr_init_disas_context(DisasContextBase *dcbase,
     return MIN(max_insns, bound);
 }
 
-static void sparc_tr_tb_start(DisasContextBase *db, CPUState *cs)
+static int sparc_tr_tb_start(DisasContextBase *db, CPUState *cs, int max_insns)
 {
+    return max_insns;
 }
 
 static void sparc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
