@@ -1534,7 +1534,8 @@ static int openrisc_tr_init_disas_context(DisasContextBase *dcbase,
     return max_insns;
 }
 
-static void openrisc_tr_tb_start(DisasContextBase *db, CPUState *cs)
+static int openrisc_tr_tb_start(DisasContextBase *db, CPUState *cs,
+                                int max_insns)
 {
     DisasContext *dc = container_of(db, DisasContext, base);
 
@@ -1545,6 +1546,7 @@ static void openrisc_tr_tb_start(DisasContextBase *db, CPUState *cs)
     } else {
         cpu_R[0] = cpu_R0;
     }
+    return max_insns;
 }
 
 static void openrisc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
