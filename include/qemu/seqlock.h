@@ -25,7 +25,7 @@ struct QemuSeqLock {
 
 static inline void seqlock_init(QemuSeqLock *sl)
 {
-    sl->sequence = 0;
+    atomic_set(&sl->sequence, 0);
 }
 
 /* Lock out other writers and update the count.  */
