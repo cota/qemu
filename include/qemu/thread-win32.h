@@ -15,9 +15,9 @@ struct QemuRecMutex {
 };
 
 void qemu_rec_mutex_destroy(QemuRecMutex *mutex);
-void qemu_rec_mutex_lock(QemuRecMutex *mutex);
-int qemu_rec_mutex_trylock(QemuRecMutex *mutex);
-void qemu_rec_mutex_unlock(QemuRecMutex *mutex);
+void qemu_rec_mutex_lock_impl(QemuRecMutex *mutex, const char *file, int line);
+int qemu_rec_mutex_trylock_impl(QemuRecMutex *m, const char *file, int line);
+void qemu_rec_mutex_unlock_impl(QemuRecMutex *m, const char *file, int line);
 
 struct QemuCond {
     CONDITION_VARIABLE var;

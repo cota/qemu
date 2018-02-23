@@ -98,19 +98,19 @@ void qemu_rec_mutex_destroy(QemuRecMutex *mutex)
     DeleteCriticalSection(&mutex->lock);
 }
 
-void qemu_rec_mutex_lock(QemuRecMutex *mutex)
+void qemu_rec_mutex_lock_impl(QemuRecMutex *mutex, const char *file, int line)
 {
     assert(mutex->initialized);
     EnterCriticalSection(&mutex->lock);
 }
 
-int qemu_rec_mutex_trylock(QemuRecMutex *mutex)
+int qemu_rec_mutex_trylock_impl(QemuRecMutex *mutex, const char *file, int line)
 {
     assert(mutex->initialized);
     return !TryEnterCriticalSection(&mutex->lock);
 }
 
-void qemu_rec_mutex_unlock(QemuRecMutex *mutex)
+void qemu_rec_mutex_unlock_impl(QemuRecMutex *mutex, const char *file, int line)
 {
     assert(mutex->initialized);
     LeaveCriticalSection(&mutex->lock);

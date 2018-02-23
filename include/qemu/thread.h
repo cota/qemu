@@ -27,10 +27,16 @@ void qemu_mutex_unlock_impl(QemuMutex *mutex, const char *file, const int line);
 
 #define qemu_mutex_lock(mutex) \
         qemu_mutex_lock_impl(mutex, __FILE__, __LINE__)
+#define qemu_rec_mutex_lock(mutex) \
+        qemu_rec_mutex_lock_impl(mutex, __FILE__, __LINE__)
 #define qemu_mutex_trylock(mutex) \
         qemu_mutex_trylock_impl(mutex, __FILE__, __LINE__)
+#define qemu_rec_mutex_trylock(mutex) \
+        qemu_rec_mutex_trylock_impl(mutex, __FILE__, __LINE__)
 #define qemu_mutex_unlock(mutex) \
         qemu_mutex_unlock_impl(mutex, __FILE__, __LINE__)
+#define qemu_rec_mutex_unlock(mutex) \
+        qemu_rec_mutex_unlock_impl(mutex, __FILE__, __LINE__)
 
 static inline void (qemu_mutex_lock)(QemuMutex *mutex)
 {
