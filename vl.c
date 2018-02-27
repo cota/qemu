@@ -695,7 +695,7 @@ static bool runstate_valid_transitions[RUN_STATE__MAX][RUN_STATE__MAX];
 
 bool runstate_check(RunState state)
 {
-    return current_run_state == state;
+    return atomic_read(&current_run_state) == state;
 }
 
 bool runstate_store(char *str, size_t size)
@@ -738,7 +738,7 @@ void runstate_set(RunState new_state)
         abort();
     }
     trace_runstate_set(new_state);
-    current_run_state = new_state;
+    atomic_set(&current_run_state, new_state);
 }
 
 int runstate_is_running(void)
@@ -758,7 +758,7 @@ StatusInfo *qmp_query_status(Error **errp)
 
     info->running = runstate_is_running();
     info->singlestep = singlestep;
-    info->status = current_run_state;
+    info->status = atomic_read(&current_run_state);
 
     return info;
 }
