@@ -1,12 +1,16 @@
 #include "qemu/osdep.h"
 #include <glib/gprintf.h>
 
+#include <fenv.h>
+#include <math.h>
+
 #include "qemu/bitops.h"
 
 enum error {
     ERROR_NONE,
     ERROR_INPUT,
-    ERROR_FP,
+    ERROR_RESULT,
+    ERROR_FLAGS,
 };
 
 enum input_fmt {
@@ -44,11 +48,13 @@ struct test_op {
     uint8_t trapped_exceptions;
     uint8_t expected_exceptions;
     bool expected_result_is_valid;
+    bool expected_nan;
 };
 
 typedef enum error (*tester_func_t)(const struct test_op *);
 
 struct tester {
+    struct float_status status;
     tester_func_t func;
     const char *name;
 };
@@ -130,7 +136,7 @@ static int ibm_get_exceptions(const char *p, uint8_t *excp)
             *excp |= float_flag_divbyzero;
             break;
         case 'i':
-            *excp |= float_flag_invalid;;
+            *excp |= float_flag_invalid;
             break;
         default:
             return 1;
@@ -152,17 +158,25 @@ static uint64_t fp_choose(enum precision prec, uint64_t f, uint64_t d)
     }
 }
 
-static int ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret)
+static int
+ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret, bool *is_nan)
 {
     int len;
-    bool negative;
 
-    if (unlikely(p[0] == 'Q')) {
+    /* QNaN */
+    if (unlikely(!strcmp("Q", p))) {
         *ret = fp_choose(prec, 0xffc00000, 0xfff8000000000000);
+        if (is_nan) {
+            *is_nan = true;
+        }
         return 0;
     }
-    if (unlikely(p[0] == 'S')) {
+    /* SNaN */
+    if (unlikely(!strcmp("S", p))) {
         *ret = fp_choose(prec, 0xffb00000, 0xfff7000000000000);
+        if (is_nan) {
+            *is_nan = true;
+        }
         return 0;
     }
     if (unlikely(!strcmp("+Zero", p))) {
@@ -183,35 +197,68 @@ static int ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret)
     }
 
     len = strlen(p);
-    if (len <= 4) {
-        return 1;
-    }
-    negative = !strncmp(p, "-1", 2);
-    if (prec == PREC_FLOAT) {
-        uint32_t exponent;
-        uint32_t significand;
-        uint32_t h;
+
+    if (strchr(p, 'P')) {
+        bool negative = p[0] == '-';
+        char *pos;
+        bool denormal;
+
+        if (len <= 4) {
+            return 1;
+        }
+        denormal = p[1] == '0';
+        if (prec == PREC_FLOAT) {
+            uint32_t exponent;
+            uint32_t significand;
+            uint32_t h;
+
+            significand = strtoul(&p[3], &pos, 16);
+            if (*pos != 'P') {
+                return 1;
+            }
+            pos++;
+            exponent = strtol(pos, &pos, 10) + 127;
+            if (pos != p + len) {
+                return 1;
+            }
+            /*
+             * When there's a leading zero, we have a denormal number. We'd
+             * expect the input (unbiased) exponent to be -127, but for some
+             * reason -126 is used. Correct that here.
+             */
+            if (denormal) {
+                if (exponent != 1) {
+                    return 1;
+                }
+                exponent = 0;
+            }
+            h = negative ? BIT(31) : 0;
+            h |= exponent << 23;
+            h |= significand;
+            *ret = h;
+            return 0;
+        }
+        if (prec == PREC_DOUBLE) {
+            return 0; /* XXX */
+        }
+        g_assert_not_reached();
+    } else if (strchr(p, 'E') || strchr(p, 'e')) {
         char *pos;
 
-        significand = strtoul(&p[3], &pos, 16);
-        if (*pos != 'P') {
-            return 1;
+        if (prec == PREC_FLOAT) {
+            float f = strtof(p, &pos);
+
+            if (*pos) {
+                return 1;
+            }
+            *ret = float_to_u64(f);
         }
-        pos++;
-        exponent = strtol(pos, &pos, 10) + 127;
-        if (pos != p + len) {
-            return 1;
+        if (prec == PREC_DOUBLE) {
+            return 0; /* XXX */
         }
-        h = negative ? BIT(31) : 0;
-        h |= exponent << 23;
-        h |= significand;
-        *ret = h;
-        return 0;
+        g_assert_not_reached();
     }
-    if (prec == PREC_DOUBLE) {
-        return 0; /* XXX */
-    }
-    g_assert_not_reached();
+    return 1;
 }
 
 /* Syntax of IBM FP test cases:
@@ -277,11 +324,11 @@ static enum error ibm_test_line(const char *line)
     }
 
     p = s[field++];
-    if (ibm_fp_hex(p, t.prec, &t.a)) {
+    if (ibm_fp_hex(p, t.prec, &t.a, NULL)) {
         return ERROR_INPUT;
     }
     p = s[field++];
-    if (ibm_fp_hex(p, t.prec, &t.b)) {
+    if (ibm_fp_hex(p, t.prec, &t.b, NULL)) {
         return ERROR_INPUT;
     }
 
@@ -294,7 +341,8 @@ static enum error ibm_test_line(const char *line)
     if (unlikely(strcmp("#", p) == 0)) {
         t.expected_result_is_valid = false;
     } else {
-        if (ibm_fp_hex(p, t.prec, &t.expected_result)) {
+        t.expected_nan = false;
+        if (ibm_fp_hex(p, t.prec, &t.expected_result, &t.expected_nan)) {
             return ERROR_INPUT;
         }
         t.expected_result_is_valid = true;
@@ -333,11 +381,15 @@ static void test_file(const char *filename)
         if (unlikely(err)) {
             switch (err) {
             case ERROR_INPUT:
-                fprintf(stderr, "Malformed input at %s:%d:\n%s",
+                fprintf(stderr, "error: malformed input @ %s:%d:\n%s",
                         filename, i, line);
                 break;
-            case ERROR_FP:
-                fprintf(stderr, "Computation error for input at %s:%d:\n%s",
+            case ERROR_RESULT:
+                fprintf(stderr, "error: result mismatch for input @ %s:%d:\n%s",
+                        filename, i, line);
+                break;
+            case ERROR_FLAGS:
+                fprintf(stderr, "error: flags mismatch for input @ %s:%d:\n%s",
                         filename, i, line);
                 break;
             default:
@@ -352,9 +404,42 @@ static void test_file(const char *filename)
     }
 }
 
+static int host_flags_compare(int host_flags, uint8_t expected)
+{
+    int flags = 0;
+
+    if (host_flags & FE_INEXACT) {
+        flags |= float_flag_inexact;
+    }
+    if (host_flags & FE_UNDERFLOW) {
+        flags |= float_flag_underflow;
+    }
+    if (host_flags & FE_OVERFLOW) {
+        flags |= float_flag_overflow;
+    }
+    if (host_flags & FE_DIVBYZERO) {
+        flags |= float_flag_divbyzero;
+    }
+    if (host_flags & FE_INVALID) {
+        flags |= float_flag_invalid;
+    }
+
+    return flags != expected;
+}
+
 static enum error host_noflags_tester(const struct test_op *t)
 {
     uint64_t res64;
+    bool result_is_nan;
+    enum error err = ERROR_NONE;
+
+    /* we ignore "trapped exceptions" because we're not testing the trapping
+     * mechanism of the host CPU.
+     * We test though that (untrapped) exceptions are correctly set.
+     */
+    if (t->expected_exceptions) {
+        feclearexcept(FE_ALL_EXCEPT);
+    }
 
     if (t->prec == PREC_FLOAT) {
         float a = u64_to_float(t->a);
@@ -369,16 +454,37 @@ static enum error host_noflags_tester(const struct test_op *t)
             g_assert_not_reached();
         }
         res64 = float_to_u64(res);
+        result_is_nan = isnan(res);
     } else {
         return ERROR_NONE; /* XXX */
     }
-    if (res64 != t->expected_result) {
+    if (t->expected_result_is_valid) {
+        if (t->expected_nan) {
+            if (!result_is_nan) {
+                err = ERROR_RESULT;
+                goto out;
+            }
+        } else if (res64 != t->expected_result) {
+            err = ERROR_RESULT;
+            goto out;
+        }
+    }
+    if (t->expected_exceptions) {
+        int flags = fetestexcept(FE_ALL_EXCEPT);
+
+        if (host_flags_compare(flags, t->expected_exceptions)) {
+            err = ERROR_FLAGS;
+            goto out;
+        }
+    }
+
+ out:
+    if (err) {
         fprintf(stderr, "%s 0x%" PRIx64 " 0x%" PRIx64 ", expected: 0x%"
                 PRIx64 ", obtained: 0x%" PRIx64 "\n",
                 op_str[t->op], t->a, t->b, t->expected_result, res64);
-        return ERROR_FP;
     }
-    return ERROR_NONE;
+    return err;
 }
 
 static void set_input_fmt(const char *optarg)
