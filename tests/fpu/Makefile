@@ -17,5 +17,7 @@ ibm-fptests:
 
 fpu: fpu.o ibm-fptests
 
+test: test.o
+
 clean:
 	rm -f fp *.o *.d

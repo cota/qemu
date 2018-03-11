@@ -79,27 +79,8 @@ static const struct input valid_input_types[] = {
     },
 };
 
-static enum error host_noflags_tester(const struct test_op *t);
-
-static const struct tester valid_testers[] = {
-    [0] = {
-        .name = "host-noflags",
-        .func = host_noflags_tester,
-    },
-};
-
 static const struct input *input_type = &valid_input_types[INPUT_FMT_IBM];
-static const struct tester *tester = &valid_testers[0];
 static uint64_t test_stats[2];
-
-static void usage_complete(int argc, char *argv[])
-{
-    fprintf(stderr, "Usage: %s [options] file1 [file2 ...]\n", argv[0]);
-    fprintf(stderr, "options:\n");
-    fprintf(stderr, "  -f = format of the input file(s). Default: %s\n",
-            valid_input_types[0].name);
-    fprintf(stderr, "  -t = tester. Default: %s\n", valid_testers[0].name);
-}
 
 static inline float u64_to_float(uint64_t v)
 {
@@ -134,6 +115,131 @@ static inline bool is_err(enum error err)
 {
     return err != ERROR_NONE && err != ERROR_NOT_HANDLED;
 }
+
+static int host_exceptions_translate(int host_flags)
+{
+    int flags = 0;
+
+    if (host_flags & FE_INEXACT) {
+        flags |= float_flag_inexact;
+    }
+    if (host_flags & FE_UNDERFLOW) {
+        flags |= float_flag_underflow;
+    }
+    if (host_flags & FE_OVERFLOW) {
+        flags |= float_flag_overflow;
+    }
+    if (host_flags & FE_DIVBYZERO) {
+        flags |= float_flag_divbyzero;
+    }
+    if (host_flags & FE_INVALID) {
+        flags |= float_flag_invalid;
+    }
+    return flags;
+}
+
+static inline int host_get_exceptions(void)
+{
+    return host_exceptions_translate(fetestexcept(FE_ALL_EXCEPT));
+}
+
+static enum error host_noflags_tester(const struct test_op *t)
+{
+    uint64_t res64;
+    bool result_is_nan;
+    enum error err = ERROR_NONE;
+    int flags = 0;
+
+    /*
+     * We ignore "trapped exceptions" because we're not testing the trapping
+     * mechanism of the host CPU.
+     * We test though that the exception bits are correctly set.
+     */
+    if (t->trapped_exceptions) {
+        return ERROR_NOT_HANDLED;
+    }
+    if (t->exceptions) {
+        feclearexcept(FE_ALL_EXCEPT);
+    }
+
+    if (t->prec == PREC_FLOAT) {
+        float a = u64_to_float(t->operands[0]);
+        float b = u64_to_float(t->operands[1]);
+        float res;
+
+        switch (t->op) {
+        case OP_ADD:
+            res = a + b;
+            break;
+        case OP_SUBTRACT:
+            res = a - b;
+            break;
+        case OP_MUL:
+            res = a * b;
+            break;
+        case OP_DIV:
+            res = a / b;
+            break;
+        case OP_SQRT:
+            res = sqrt(a);
+            break;
+        default:
+            g_assert_not_reached();
+        }
+        if (t->exceptions) {
+            flags = host_get_exceptions();
+        }
+        res64 = float_to_u64(res);
+        result_is_nan = isnan(res);
+    } else {
+        return ERROR_NOT_HANDLED; /* XXX */
+    }
+    if (t->expected_result_is_valid) {
+        if (t->expected_nan) {
+            if (!result_is_nan) {
+                err = ERROR_RESULT;
+                goto out;
+            }
+        } else if (res64 != t->expected_result) {
+            err = ERROR_RESULT;
+            goto out;
+        }
+    }
+    if (t->exceptions && flags != t->exceptions) {
+        if (t->exceptions == (float_flag_inexact | float_flag_underflow) &&
+            flags == float_flag_inexact) {
+            /*
+             * this is probably OK. Some ppc hosts will set the underflow
+             * bit, and some others won't.
+             */
+        } else {
+            err = ERROR_EXCEPTIONS;
+            goto out;
+        }
+    }
+
+ out:
+    if (is_err(err)) {
+        fprintf(stderr, "%s 0x%" PRIx64 " 0x%" PRIx64 ", expected: 0x%"
+                PRIx64 ", returned: 0x%" PRIx64,
+                ops[t->op].name, t->operands[0], t->operands[1],
+                t->expected_result, res64);
+        if (err == ERROR_EXCEPTIONS) {
+            fprintf(stderr, ", expected exceptions: 0x%x, returned: 0x%x",
+                    t->exceptions, flags);
+        }
+        fprintf(stderr, "\n");
+    }
+    return err;
+}
+
+static const struct tester valid_testers[] = {
+    [0] = {
+        .name = "host-noflags",
+        .func = host_noflags_tester,
+    },
+};
+static const struct tester *tester = &valid_testers[0];
 
 static int ibm_get_exceptions(const char *p, uint8_t *excp)
 {
@@ -425,123 +531,6 @@ static void test_file(const char *filename)
     }
 }
 
-static int host_exceptions_translate(int host_flags)
-{
-    int flags = 0;
-
-    if (host_flags & FE_INEXACT) {
-        flags |= float_flag_inexact;
-    }
-    if (host_flags & FE_UNDERFLOW) {
-        flags |= float_flag_underflow;
-    }
-    if (host_flags & FE_OVERFLOW) {
-        flags |= float_flag_overflow;
-    }
-    if (host_flags & FE_DIVBYZERO) {
-        flags |= float_flag_divbyzero;
-    }
-    if (host_flags & FE_INVALID) {
-        flags |= float_flag_invalid;
-    }
-    return flags;
-}
-
-static inline int host_get_exceptions(void)
-{
-    return host_exceptions_translate(fetestexcept(FE_ALL_EXCEPT));
-}
-
-static enum error host_noflags_tester(const struct test_op *t)
-{
-    uint64_t res64;
-    bool result_is_nan;
-    enum error err = ERROR_NONE;
-    int flags = 0;
-
-    /*
-     * We ignore "trapped exceptions" because we're not testing the trapping
-     * mechanism of the host CPU.
-     * We test though that the exception bits are correctly set.
-     */
-    if (t->trapped_exceptions) {
-        return ERROR_NOT_HANDLED;
-    }
-    if (t->exceptions) {
-        feclearexcept(FE_ALL_EXCEPT);
-    }
-
-    if (t->prec == PREC_FLOAT) {
-        float a = u64_to_float(t->operands[0]);
-        float b = u64_to_float(t->operands[1]);
-        float res;
-
-        switch (t->op) {
-        case OP_ADD:
-            res = a + b;
-            break;
-        case OP_SUBTRACT:
-            res = a - b;
-            break;
-        case OP_MUL:
-            res = a * b;
-            break;
-        case OP_DIV:
-            res = a / b;
-            break;
-        case OP_SQRT:
-            res = sqrt(a);
-            break;
-        default:
-            g_assert_not_reached();
-        }
-        if (t->exceptions) {
-            flags = host_get_exceptions();
-        }
-        res64 = float_to_u64(res);
-        result_is_nan = isnan(res);
-    } else {
-        return ERROR_NOT_HANDLED; /* XXX */
-    }
-    if (t->expected_result_is_valid) {
-        if (t->expected_nan) {
-            if (!result_is_nan) {
-                err = ERROR_RESULT;
-                goto out;
-            }
-        } else if (res64 != t->expected_result) {
-            err = ERROR_RESULT;
-            goto out;
-        }
-    }
-    if (t->exceptions && flags != t->exceptions) {
-        if (t->exceptions == (float_flag_inexact | float_flag_underflow) &&
-            flags == float_flag_inexact) {
-            /*
-             * this is probably OK. Some ppc hosts will set the underflow
-             * bit, and some others won't.
-             */
-        } else {
-            err = ERROR_EXCEPTIONS;
-            goto out;
-        }
-    }
-
- out:
-    if (is_err(err)) {
-        fprintf(stderr, "%s 0x%" PRIx64 " 0x%" PRIx64 ", expected: 0x%"
-                PRIx64 ", returned: 0x%" PRIx64,
-                ops[t->op].name, t->operands[0], t->operands[1],
-                t->expected_result, res64);
-        if (err == ERROR_EXCEPTIONS) {
-            fprintf(stderr, ", expected exceptions: 0x%x, returned: 0x%x",
-                    t->exceptions, flags);
-        }
-        fprintf(stderr, "\n");
-    }
-    return err;
-}
-
 static void set_input_fmt(const char *optarg)
 {
     int i;
@@ -572,6 +561,15 @@ static void set_tester(const char *optarg)
     }
     fprintf(stderr, "Unknown tester '%s'", optarg);
     exit(EXIT_FAILURE);
+}
+
+static void usage_complete(int argc, char *argv[])
+{
+    fprintf(stderr, "Usage: %s [options] file1 [file2 ...]\n", argv[0]);
+    fprintf(stderr, "options:\n");
+    fprintf(stderr, "  -f = format of the input file(s). Default: %s\n",
+            valid_input_types[0].name);
+    fprintf(stderr, "  -t = tester. Default: %s\n", valid_testers[0].name);
 }
 
 static void parse_opts(int argc, char *argv[])
