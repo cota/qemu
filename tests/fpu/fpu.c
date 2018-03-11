@@ -8,9 +8,10 @@
 
 enum error {
     ERROR_NONE,
+    ERROR_NOT_HANDLED,
     ERROR_INPUT,
     ERROR_RESULT,
-    ERROR_FLAGS,
+    ERROR_EXCEPTIONS,
 };
 
 enum input_fmt {
@@ -30,23 +31,33 @@ enum precision {
 
 enum op {
     OP_ADD,
-    /* XXX */
-    OP_MAX_NR,
+    OP_SUBTRACT,
+    OP_MUL,
+    OP_DIV,
+    OP_SQRT,
 };
 
-static const char * const op_str[OP_MAX_NR] = {
-    [OP_ADD] = "+",
+struct op_desc {
+    const char * const name;
+    int n_operands;
+};
+
+static const struct op_desc ops[] = {
+    [OP_ADD] = { "+", 2 },
+    [OP_SUBTRACT] = { "-", 2 },
+    [OP_MUL] = { "*", 2 },
+    [OP_DIV] = { "/", 2 },
+    [OP_SQRT] = { "V", 1 },
 };
 
 struct test_op {
-    uint64_t a;
-    uint64_t b;
+    uint64_t operands[3];
     uint64_t expected_result;
     enum precision prec;
     enum op op;
     signed char round;
     uint8_t trapped_exceptions;
-    uint8_t expected_exceptions;
+    uint8_t exceptions;
     bool expected_result_is_valid;
     bool expected_nan;
 };
@@ -79,7 +90,7 @@ static const struct tester valid_testers[] = {
 
 static const struct input *input_type = &valid_input_types[INPUT_FMT_IBM];
 static const struct tester *tester = &valid_testers[0];
-//static struct float_status status;
+static uint64_t test_stats[2];
 
 static void usage_complete(int argc, char *argv[])
 {
@@ -117,6 +128,11 @@ static inline uint64_t double_to_u64(double d)
     double *dp = &d;
 
     return *(uint64_t *)dp;
+}
+
+static inline bool is_err(enum error err)
+{
+    return err != ERROR_NONE && err != ERROR_NOT_HANDLED;
 }
 
 static int ibm_get_exceptions(const char *p, uint8_t *excp)
@@ -271,10 +287,11 @@ static enum error ibm_test_line(const char *line)
     char s[9][64];
     char *p;
     int n, field;
+    int i;
 
     /* data lines start with either b32 or d(64|128) */
     if (unlikely(line[0] != 'b' && line[0] != 'd')) {
-        return ERROR_NONE;
+        return ERROR_NOT_HANDLED;
     }
     n = sscanf(line, "%63s %63s %63s %63s %63s %63s %63s %63s %63s",
                s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8]);
@@ -292,15 +309,19 @@ static enum error ibm_test_line(const char *line)
     } else if (strncmp("d64", p, 3) == 0) {
         t.prec = PREC_DOUBLE;
     } else if (strncmp("d128", p, 3) == 0) {
-        return ERROR_NONE; /* XXX */
+        return ERROR_NOT_HANDLED; /* XXX */
     } else {
         return ERROR_INPUT;
     }
 
-    if (strcmp("+", &p[3]) == 0) {
-        t.op = OP_ADD;
-    } else {
-        return ERROR_NONE; /* XXX */
+    for (i = 0; i < ARRAY_SIZE(ops); i++) {
+        if (strcmp(ops[i].name, &p[3]) == 0) {
+            t.op = i;
+            break;
+        }
+    }
+    if (i == ARRAY_SIZE(ops)) {
+        return ERROR_NOT_HANDLED;
     }
 
     field = 1;
@@ -308,7 +329,7 @@ static enum error ibm_test_line(const char *line)
     if (!strncmp("=0", p, 2)) {
         t.round = float_round_nearest_even;
     } else {
-        return ERROR_NONE; /* XXX */
+        return ERROR_NOT_HANDLED; /* XXX */
     }
 
     /* The trapped exceptions field is optional */
@@ -323,13 +344,11 @@ static enum error ibm_test_line(const char *line)
         field++;
     }
 
-    p = s[field++];
-    if (ibm_fp_hex(p, t.prec, &t.a, NULL)) {
-        return ERROR_INPUT;
-    }
-    p = s[field++];
-    if (ibm_fp_hex(p, t.prec, &t.b, NULL)) {
-        return ERROR_INPUT;
+    for (i = 0; i < ops[t.op].n_operands; i++) {
+        p = s[field++];
+        if (ibm_fp_hex(p, t.prec, &t.operands[i], NULL)) {
+            return ERROR_INPUT;
+        }
     }
 
     p = s[field++];
@@ -349,10 +368,10 @@ static enum error ibm_test_line(const char *line)
     }
 
     /* the expected exceptions field is optional */
-    t.expected_exceptions = 0;
+    t.exceptions = 0;
     if (field == n - 1) {
         p = s[field++];
-        if (ibm_get_exceptions(p, &t.expected_exceptions)) {
+        if (ibm_get_exceptions(p, &t.exceptions)) {
             return ERROR_INPUT;
         }
     }
@@ -378,7 +397,7 @@ static void test_file(const char *filename)
 
         i++;
         err = input_type->test_line(line);
-        if (unlikely(err)) {
+        if (unlikely(is_err(err))) {
             switch (err) {
             case ERROR_INPUT:
                 fprintf(stderr, "error: malformed input @ %s:%d:\n%s",
@@ -388,7 +407,7 @@ static void test_file(const char *filename)
                 fprintf(stderr, "error: result mismatch for input @ %s:%d:\n%s",
                         filename, i, line);
                 break;
-            case ERROR_FLAGS:
+            case ERROR_EXCEPTIONS:
                 fprintf(stderr, "error: flags mismatch for input @ %s:%d:\n%s",
                         filename, i, line);
                 break;
@@ -396,6 +415,8 @@ static void test_file(const char *filename)
                 g_assert_not_reached();
             }
             exit(EXIT_FAILURE);
+        } else {
+            test_stats[err]++;
         }
     }
     if (fclose(fp)) {
@@ -404,7 +425,7 @@ static void test_file(const char *filename)
     }
 }
 
-static int host_flags_compare(int host_flags, uint8_t expected)
+static int host_exceptions_translate(int host_flags)
 {
     int flags = 0;
 
@@ -423,8 +444,12 @@ static int host_flags_compare(int host_flags, uint8_t expected)
     if (host_flags & FE_INVALID) {
         flags |= float_flag_invalid;
     }
+    return flags;
+}
 
-    return flags != expected;
+static inline int host_get_exceptions(void)
+{
+    return host_exceptions_translate(fetestexcept(FE_ALL_EXCEPT));
 }
 
 static enum error host_noflags_tester(const struct test_op *t)
@@ -432,31 +457,51 @@ static enum error host_noflags_tester(const struct test_op *t)
     uint64_t res64;
     bool result_is_nan;
     enum error err = ERROR_NONE;
+    int flags = 0;
 
-    /* we ignore "trapped exceptions" because we're not testing the trapping
+    /*
+     * We ignore "trapped exceptions" because we're not testing the trapping
      * mechanism of the host CPU.
-     * We test though that (untrapped) exceptions are correctly set.
+     * We test though that the exception bits are correctly set.
      */
-    if (t->expected_exceptions) {
+    if (t->trapped_exceptions) {
+        return ERROR_NOT_HANDLED;
+    }
+    if (t->exceptions) {
         feclearexcept(FE_ALL_EXCEPT);
     }
 
     if (t->prec == PREC_FLOAT) {
-        float a = u64_to_float(t->a);
-        float b = u64_to_float(t->b);
+        float a = u64_to_float(t->operands[0]);
+        float b = u64_to_float(t->operands[1]);
         float res;
 
         switch (t->op) {
         case OP_ADD:
             res = a + b;
             break;
+        case OP_SUBTRACT:
+            res = a - b;
+            break;
+        case OP_MUL:
+            res = a * b;
+            break;
+        case OP_DIV:
+            res = a / b;
+            break;
+        case OP_SQRT:
+            res = sqrt(a);
+            break;
         default:
             g_assert_not_reached();
+        }
+        if (t->exceptions) {
+            flags = host_get_exceptions();
         }
         res64 = float_to_u64(res);
         result_is_nan = isnan(res);
     } else {
-        return ERROR_NONE; /* XXX */
+        return ERROR_NOT_HANDLED; /* XXX */
     }
     if (t->expected_result_is_valid) {
         if (t->expected_nan) {
@@ -469,20 +514,30 @@ static enum error host_noflags_tester(const struct test_op *t)
             goto out;
         }
     }
-    if (t->expected_exceptions) {
-        int flags = fetestexcept(FE_ALL_EXCEPT);
-
-        if (host_flags_compare(flags, t->expected_exceptions)) {
-            err = ERROR_FLAGS;
+    if (t->exceptions && flags != t->exceptions) {
+        if (t->exceptions == (float_flag_inexact | float_flag_underflow) &&
+            flags == float_flag_inexact) {
+            /*
+             * this is probably OK. Some ppc hosts will set the underflow
+             * bit, and some others won't.
+             */
+        } else {
+            err = ERROR_EXCEPTIONS;
             goto out;
         }
     }
 
  out:
-    if (err) {
+    if (is_err(err)) {
         fprintf(stderr, "%s 0x%" PRIx64 " 0x%" PRIx64 ", expected: 0x%"
-                PRIx64 ", obtained: 0x%" PRIx64 "\n",
-                op_str[t->op], t->a, t->b, t->expected_result, res64);
+                PRIx64 ", returned: 0x%" PRIx64,
+                ops[t->op].name, t->operands[0], t->operands[1],
+                t->expected_result, res64);
+        if (err == ERROR_EXCEPTIONS) {
+            fprintf(stderr, ", expected exceptions: 0x%x, returned: 0x%x",
+                    t->exceptions, flags);
+        }
+        fprintf(stderr, "\n");
     }
     return err;
 }
@@ -552,5 +607,7 @@ int main(int argc, char *argv[])
     for (i = 1; i < argc; i++) {
         test_file(argv[i]);
     }
+    printf("All tests OK. Passed: %"PRIu64", not handled: %"PRIu64"\n",
+           test_stats[ERROR_NONE], test_stats[ERROR_NOT_HANDLED]);
     return 0;
 }
