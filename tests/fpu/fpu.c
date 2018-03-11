@@ -132,7 +132,7 @@ static inline int host_get_exceptions(void)
     return host_exceptions_translate(fetestexcept(FE_ALL_EXCEPT));
 }
 
-static enum error host_noflags_tester(const struct test_op *t)
+static enum error host_tester(const struct test_op *t)
 {
     uint64_t res64;
     bool result_is_nan;
@@ -225,7 +225,7 @@ static enum error host_noflags_tester(const struct test_op *t)
 static const struct tester valid_testers[] = {
     [0] = {
         .name = "host",
-        .func = host_noflags_tester,
+        .func = host_tester,
     },
 };
 static const struct tester *tester = &valid_testers[0];
