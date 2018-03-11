@@ -29,6 +29,11 @@ enum precision {
     PREC_QUAD,
 };
 
+struct op_desc {
+    const char * const name;
+    int n_operands;
+};
+
 enum op {
     OP_ADD,
     OP_SUBTRACT,
@@ -37,17 +42,12 @@ enum op {
     OP_SQRT,
 };
 
-struct op_desc {
-    const char * const name;
-    int n_operands;
-};
-
 static const struct op_desc ops[] = {
-    [OP_ADD] = { "+", 2 },
-    [OP_SUBTRACT] = { "-", 2 },
-    [OP_MUL] = { "*", 2 },
-    [OP_DIV] = { "/", 2 },
-    [OP_SQRT] = { "V", 1 },
+    [OP_ADD] =        { "+", 2 },
+    [OP_SUBTRACT] =   { "-", 2 },
+    [OP_MUL] =        { "*", 2 },
+    [OP_DIV] =        { "/", 2 },
+    [OP_SQRT] =       { "V", 1 },
 };
 
 struct test_op {
@@ -65,21 +65,10 @@ struct test_op {
 typedef enum error (*tester_func_t)(const struct test_op *);
 
 struct tester {
-    struct float_status status;
     tester_func_t func;
     const char *name;
 };
 
-static enum error ibm_test_line(const char *line);
-
-static const struct input valid_input_types[] = {
-    [INPUT_FMT_IBM] = {
-        .name = "ibm",
-        .test_line = ibm_test_line,
-    },
-};
-
-static const struct input *input_type = &valid_input_types[INPUT_FMT_IBM];
 static uint64_t test_stats[2];
 
 static inline float u64_to_float(uint64_t v)
@@ -209,8 +198,8 @@ static enum error host_noflags_tester(const struct test_op *t)
         if (t->exceptions == (float_flag_inexact | float_flag_underflow) &&
             flags == float_flag_inexact) {
             /*
-             * this is probably OK. Some ppc hosts will set the underflow
-             * bit, and some others won't.
+             * this is probably OK -- some ppc hosts set the underflow
+             * bit and others don't.
              */
         } else {
             err = ERROR_EXCEPTIONS;
@@ -484,6 +473,15 @@ static enum error ibm_test_line(const char *line)
 
     return tester->func(&t);
 }
+
+static const struct input valid_input_types[] = {
+    [INPUT_FMT_IBM] = {
+        .name = "ibm",
+        .test_line = ibm_test_line,
+    },
+};
+
+static const struct input *input_type = &valid_input_types[INPUT_FMT_IBM];
 
 static void test_file(const char *filename)
 {
