@@ -224,7 +224,7 @@ static enum error host_noflags_tester(const struct test_op *t)
 
 static const struct tester valid_testers[] = {
     [0] = {
-        .name = "host-noflags",
+        .name = "host",
         .func = host_noflags_tester,
     },
 };
