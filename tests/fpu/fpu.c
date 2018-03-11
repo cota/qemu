@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include <glib/gprintf.h>
+#include "fpu/softfloat.h"
 
 #include <fenv.h>
 #include <math.h>
@@ -127,65 +127,19 @@ static int host_exceptions_translate(int host_flags)
     return flags;
 }
 
-static inline int host_get_exceptions(void)
+static inline uint8_t host_get_exceptions(void)
 {
     return host_exceptions_translate(fetestexcept(FE_ALL_EXCEPT));
 }
 
-static enum error host_tester(const struct test_op *t)
+static enum error tester_check(const struct test_op *t, uint64_t res64,
+                               bool res_is_nan, uint8_t flags)
 {
-    uint64_t res64;
-    bool result_is_nan;
     enum error err = ERROR_NONE;
-    int flags = 0;
 
-    /*
-     * We ignore "trapped exceptions" because we're not testing the trapping
-     * mechanism of the host CPU.
-     * We test though that the exception bits are correctly set.
-     */
-    if (t->trapped_exceptions) {
-        return ERROR_NOT_HANDLED;
-    }
-    if (t->exceptions) {
-        feclearexcept(FE_ALL_EXCEPT);
-    }
-
-    if (t->prec == PREC_FLOAT) {
-        float a = u64_to_float(t->operands[0]);
-        float b = u64_to_float(t->operands[1]);
-        float res;
-
-        switch (t->op) {
-        case OP_ADD:
-            res = a + b;
-            break;
-        case OP_SUBTRACT:
-            res = a - b;
-            break;
-        case OP_MUL:
-            res = a * b;
-            break;
-        case OP_DIV:
-            res = a / b;
-            break;
-        case OP_SQRT:
-            res = sqrt(a);
-            break;
-        default:
-            g_assert_not_reached();
-        }
-        if (t->exceptions) {
-            flags = host_get_exceptions();
-        }
-        res64 = float_to_u64(res);
-        result_is_nan = isnan(res);
-    } else {
-        return ERROR_NOT_HANDLED; /* XXX */
-    }
     if (t->expected_result_is_valid) {
         if (t->expected_nan) {
-            if (!result_is_nan) {
+            if (!res_is_nan) {
                 err = ERROR_RESULT;
                 goto out;
             }
@@ -222,10 +176,90 @@ static enum error host_tester(const struct test_op *t)
     return err;
 }
 
+static enum error host_tester(const struct test_op *t)
+{
+    uint64_t res64;
+    bool result_is_nan;
+    uint8_t flags = 0;
+
+    if (t->exceptions) {
+        feclearexcept(FE_ALL_EXCEPT);
+    }
+
+    if (t->prec == PREC_FLOAT) {
+        float a = u64_to_float(t->operands[0]);
+        float b = u64_to_float(t->operands[1]);
+        float res;
+
+        switch (t->op) {
+        case OP_ADD:
+            res = a + b;
+            break;
+        case OP_SUBTRACT:
+            res = a - b;
+            break;
+        case OP_MUL:
+            res = a * b;
+            break;
+        case OP_DIV:
+            res = a / b;
+            break;
+        case OP_SQRT:
+            res = sqrt(a);
+            break;
+        default:
+            g_assert_not_reached();
+        }
+        if (t->exceptions) {
+            flags = host_get_exceptions();
+        }
+        res64 = float_to_u64(res);
+        result_is_nan = isnan(res);
+    } else {
+        return ERROR_NOT_HANDLED; /* XXX */
+    }
+    return tester_check(t, res64, result_is_nan, flags);
+}
+
+static enum error soft_tester(const struct test_op *t)
+{
+    uint64_t res64;
+    static struct float_status status;
+    enum error err = ERROR_NONE;
+    bool result_is_nan;
+
+    status.float_rounding_mode = t->round;
+    status.float_exception_flags = 0;
+
+    if (t->prec == PREC_FLOAT) {
+        float32 a = t->operands[0];
+        float32 b = t->operands[1];
+        float32 res;
+
+        switch (t->op) {
+        case OP_ADD:
+            res = float32_add(a, b, &status);
+            break;
+        default:
+            return ERROR_NOT_HANDLED; /* XXX */
+        }
+        res64 = res;
+        result_is_nan = isnan(*(float *)&res);
+    } else {
+        return ERROR_NOT_HANDLED; /* XXX */
+    }
+    return tester_check(t, res64, result_is_nan, status.float_exception_flags);
+    return err;
+}
+
 static const struct tester valid_testers[] = {
     [0] = {
         .name = "host",
         .func = host_tester,
+    },
+    [1] = {
+        .name = "soft",
+        .func = soft_tester,
     },
 };
 static const struct tester *tester = &valid_testers[0];
@@ -471,6 +505,14 @@ static enum error ibm_test_line(const char *line)
         }
     }
 
+    /*
+     * We ignore "trapped exceptions" because we're not testing the trapping
+     * mechanism of the host CPU.
+     * We test though that the exception bits are correctly set.
+     */
+    if (t.trapped_exceptions) {
+        return ERROR_NOT_HANDLED;
+    }
     return tester->func(&t);
 }
 

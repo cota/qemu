@@ -15,7 +15,7 @@ ibm-fptests:
 	unzip $(IBMFP) -d $@
 	rm -rf $(IBMFP)
 
-fpu: fpu.o ibm-fptests
+fpu: fpu.o ../../fpu/softfloat.o ibm-fptests
 
 test: test.o
 
