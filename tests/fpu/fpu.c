@@ -1,5 +1,10 @@
+#ifndef HW_POISON_H
+#error Must define HW_POISON_H to work around TARGET_* poisoning
+#endif
+
 #include "qemu/osdep.h"
-#include "fpu/softfloat.h"
+/* specialize the softfloat implementation based on TARGET_* */
+#include "softfloat.inc.c"
 
 #include <fenv.h>
 #include <math.h>
@@ -36,18 +41,18 @@ struct op_desc {
 
 enum op {
     OP_ADD,
-    OP_SUBTRACT,
+    OP_SUB,
     OP_MUL,
     OP_DIV,
     OP_SQRT,
 };
 
 static const struct op_desc ops[] = {
-    [OP_ADD] =        { "+", 2 },
-    [OP_SUBTRACT] =   { "-", 2 },
-    [OP_MUL] =        { "*", 2 },
-    [OP_DIV] =        { "/", 2 },
-    [OP_SQRT] =       { "V", 1 },
+    [OP_ADD] =      { "+", 2 },
+    [OP_SUB] =      { "-", 2 },
+    [OP_MUL] =      { "*", 2 },
+    [OP_DIV] =      { "/", 2 },
+    [OP_SQRT] =     { "V", 1 },
 };
 
 struct test_op {
@@ -195,7 +200,7 @@ static enum error host_tester(const struct test_op *t)
         case OP_ADD:
             res = a + b;
             break;
-        case OP_SUBTRACT:
+        case OP_SUB:
             res = a - b;
             break;
         case OP_MUL:
@@ -239,6 +244,18 @@ static enum error soft_tester(const struct test_op *t)
         switch (t->op) {
         case OP_ADD:
             res = float32_add(a, b, &status);
+            break;
+        case OP_SUB:
+            res = float32_sub(a, b, &status);
+            break;
+        case OP_MUL:
+            res = float32_mul(a, b, &status);
+            break;
+        case OP_DIV:
+            res = float32_div(a, b, &status);
+            break;
+        case OP_SQRT:
+            res = float32_sqrt(a, &status);
             break;
         default:
             return ERROR_NOT_HANDLED; /* XXX */
@@ -616,21 +633,24 @@ static void parse_opts(int argc, char *argv[])
 {
     int c;
 
-    c = getopt(argc, argv, "f:ht:");
-    if (c < 0) {
-        return;
+    for (;;) {
+        c = getopt(argc, argv, "f:ht:");
+        if (c < 0) {
+            return;
+        }
+        switch (c) {
+        case 'f':
+            set_input_fmt(optarg);
+            break;
+        case 'h':
+            usage_complete(argc, argv);
+            exit(EXIT_SUCCESS);
+        case 't':
+            set_tester(optarg);
+            break;
+        }
     }
-    switch (c) {
-    case 'f':
-        set_input_fmt(optarg);
-        break;
-    case 'h':
-        usage_complete(argc, argv);
-        exit(EXIT_SUCCESS);
-    case 't':
-        set_tester(optarg);
-        break;
-    }
+    g_assert_not_reached();
 }
 
 int main(int argc, char *argv[])
@@ -642,7 +662,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     parse_opts(argc, argv);
-    for (i = 1; i < argc; i++) {
+    for (i = optind; i < argc; i++) {
         test_file(argv[i]);
     }
     printf("All tests OK. Passed: %"PRIu64", not handled: %"PRIu64"\n",
