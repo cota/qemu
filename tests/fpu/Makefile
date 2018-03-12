@@ -4,6 +4,7 @@ include $(SRC_PATH)/rules.mak
 $(call set-vpath, $(SRC_PATH)/tests/fpu)
 
 QEMU_INCLUDES += -I../..
+QEMU_INCLUDES += -I$(SRC_PATH)/fpu
 # work around TARGET_* poisoning
 QEMU_CFLAGS += -DHW_POISON_H
 
@@ -25,7 +26,7 @@ ibm-fptests:
 
 DEF_TARGET = $(shell echo $@ | perl -pe 's/fpu-(.*)\.o/-DTARGET_\U$$1=1/')
 
-fpu-%.o: fpu.c
+fpu-%.o: fpu.c $(SRC_PATH)/fpu/softfloat.c $(SRC_PATH)/fpu/softfloat-specialize.h
 	$(CC_CMD) $(DEF_TARGET)
 
 test: test.o

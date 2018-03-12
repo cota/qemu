@@ -4,7 +4,7 @@
 
 #include "qemu/osdep.h"
 /* specialize the softfloat implementation based on TARGET_* */
-#include "softfloat.inc.c"
+#include "softfloat.c"
 
 #include <fenv.h>
 #include <math.h>
