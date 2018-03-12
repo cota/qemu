@@ -414,6 +414,7 @@ ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret, bool *is_nan)
                 return 1;
             }
             *ret = float_to_u64(f);
+            return 0;
         }
         if (prec == PREC_DOUBLE) {
             return 0; /* XXX */
