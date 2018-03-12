@@ -45,6 +45,8 @@ enum op {
     OP_MUL,
     OP_DIV,
     OP_SQRT,
+    OP_MINNUM,
+    OP_MAXNUM,
 };
 
 static const struct op_desc ops[] = {
@@ -53,6 +55,8 @@ static const struct op_desc ops[] = {
     [OP_MUL] =      { "*", 2 },
     [OP_DIV] =      { "/", 2 },
     [OP_SQRT] =     { "V", 1 },
+    [OP_MINNUM] =   { "<C", 2 },
+    [OP_MINNUM] =   { ">C", 2 },
 };
 
 struct test_op {
@@ -256,6 +260,12 @@ static enum error soft_tester(const struct test_op *t)
             break;
         case OP_SQRT:
             res = float32_sqrt(a, &status);
+            break;
+        case OP_MINNUM:
+            res = float32_minnum(a, b, &status);
+            break;
+        case OP_MAXNUM:
+            res = float32_maxnum(a, b, &status);
             break;
         default:
             return ERROR_NOT_HANDLED; /* XXX */
