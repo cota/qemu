@@ -62,10 +62,11 @@ expand-objs = $(strip $(sort $(filter %.o,$1)) \
                   $(foreach o,$(filter %.mo,$1),$($o-objs)) \
                   $(filter-out %.o %.mo,$1))
 
-%.o: %.c
-	$(call quiet-command,$(CC) $(QEMU_LOCAL_INCLUDES) $(QEMU_INCLUDES) \
+CC_CMD = $(call quiet-command,$(CC) $(QEMU_LOCAL_INCLUDES) $(QEMU_INCLUDES) \
 	       $(QEMU_CFLAGS) $(QEMU_DGFLAGS) $(CFLAGS) $($@-cflags) \
 	       -c -o $@ $<,"CC","$(TARGET_DIR)$@")
+%.o: %.c
+	$(CC_CMD)
 %.o: %.rc
 	$(call quiet-command,$(WINDRES) -I. -o $@ $<,"RC","$(TARGET_DIR)$@")
 
