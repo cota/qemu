@@ -56,7 +56,7 @@ static const struct op_desc ops[] = {
     [OP_DIV] =      { "/", 2 },
     [OP_SQRT] =     { "V", 1 },
     [OP_MINNUM] =   { "<C", 2 },
-    [OP_MINNUM] =   { ">C", 2 },
+    [OP_MAXNUM] =   { ">C", 2 },
 };
 
 struct test_op {
