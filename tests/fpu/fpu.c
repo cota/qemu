@@ -43,11 +43,13 @@ enum op {
     OP_ADD,
     OP_SUB,
     OP_MUL,
+    OP_MULADD,
     OP_DIV,
     OP_SQRT,
     OP_MINNUM,
     OP_MAXNUM,
     OP_MAXNUMMAG,
+    OP_ABS,
     OP_IS_NAN,
     OP_IS_INF,
 };
@@ -56,11 +58,13 @@ static const struct op_desc ops[] = {
     [OP_ADD] =       { "+", 2 },
     [OP_SUB] =       { "-", 2 },
     [OP_MUL] =       { "*", 2 },
+    [OP_MULADD] =    { "*+", 3 },
     [OP_DIV] =       { "/", 2 },
     [OP_SQRT] =      { "V", 1 },
     [OP_MINNUM] =    { "<C", 2 },
     [OP_MAXNUM] =    { ">C", 2 },
     [OP_MAXNUMMAG] = { ">A", 2 },
+    [OP_ABS] =       { "A", 1 },
     [OP_IS_NAN] =    { "?N", 1 },
     [OP_IS_INF] =    { "?i", 1 },
 };
@@ -170,6 +174,24 @@ static enum error tester_check(const struct test_op *t, uint64_t res64,
              * this is probably OK -- some ppc hosts set the underflow
              * bit and others don't.
              */
+        } else if (unlikely(t->exceptions == float_flag_invalid &&
+                            t->op == OP_MULADD)) {
+            /*
+             * muladd(Zero, Inf, NaN) does not have to raise the invalid
+             * flag, despite what the test input might expect.
+             */
+            if (t->prec == PREC_FLOAT) {
+                float a = u64_to_float(t->operands[0]);
+                float b = u64_to_float(t->operands[1]);
+                float c = u64_to_float(t->operands[2]);
+
+                /* whitelist Zero,Inf,NaN and Inf,Zero,NaN */
+                if (!((fpclassify(a) == FP_ZERO && isinf(b) && isnan(c)) ||
+                      (isinf(a) && fpclassify(b) == FP_ZERO && isnan(c)))) {
+                    err = ERROR_EXCEPTIONS;
+                    goto out;
+                }
+            }
         } else {
             err = ERROR_EXCEPTIONS;
             goto out;
@@ -178,9 +200,14 @@ static enum error tester_check(const struct test_op *t, uint64_t res64,
 
  out:
     if (is_err(err)) {
-        fprintf(stderr, "%s 0x%" PRIx64 " 0x%" PRIx64 ", expected: 0x%"
-                PRIx64 ", returned: 0x%" PRIx64,
-                ops[t->op].name, t->operands[0], t->operands[1],
+        int i;
+
+        fprintf(stderr, "%s ", ops[t->op].name);
+        for (i = 0; i < ops[t->op].n_operands; i++) {
+            fprintf(stderr, "0x%" PRIx64 "%s",
+                    t->operands[i], i < ops[t->op].n_operands - 1 ? " " : "");
+        }
+        fprintf(stderr, ", expected: 0x%" PRIx64 ", returned: 0x%" PRIx64,
                 t->expected_result, res64);
         if (err == ERROR_EXCEPTIONS) {
             fprintf(stderr, ", expected exceptions: 0x%x, returned: 0x%x",
@@ -216,11 +243,21 @@ static enum error host_tester(const struct test_op *t)
         case OP_MUL:
             res = a * b;
             break;
+        case OP_MULADD:
+        {
+            float c = u64_to_float(t->operands[2]);
+
+            res = fmaf(a, b, c);
+            break;
+        }
         case OP_DIV:
             res = a / b;
             break;
         case OP_SQRT:
             res = sqrt(a);
+            break;
+        case OP_ABS:
+            res = fabsf(a);
             break;
         case OP_IS_NAN:
             res = !!isnan(a);
@@ -267,6 +304,13 @@ static enum error soft_tester(const struct test_op *t)
         case OP_MUL:
             res = float32_mul(a, b, &status);
             break;
+        case OP_MULADD:
+        {
+            float32 c = t->operands[2];
+
+            res = float32_muladd(a, b, c, 0, &status);
+            break;
+        }
         case OP_DIV:
             res = float32_div(a, b, &status);
             break;
@@ -296,6 +340,8 @@ static enum error soft_tester(const struct test_op *t)
             res = float_to_u64(f);
             break;
         }
+        case OP_ABS:
+            /* Fall-through: float32_abs does not handle NaN's */
         default:
             return ERROR_NOT_HANDLED;
         }
