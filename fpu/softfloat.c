@@ -82,6 +82,8 @@ this code that are retained.
 /* softfloat (and in particular the code in softfloat-specialize.h) is
  * target-dependent and needs the TARGET_* macros.
  */
+#include <math.h>
+
 #include "qemu/osdep.h"
 #include "qemu/bitops.h"
 #include "fpu/softfloat.h"
@@ -1859,10 +1861,47 @@ int float ## sz ## _compare_quiet(float ## sz a, float ## sz b,         \
 }
 
 COMPARE(16)
-COMPARE(32)
 COMPARE(64)
 
 #undef COMPARE
+
+static inline
+int fpu_float32_compare(float32 a, float32 b, bool is_quiet, float_status *s)
+{
+    float af = *(float *)&a;
+    float bf = *(float *)&b;
+
+    if (unlikely(isnan(af) || isnan(bf))) {
+        FloatParts pa = float32_unpack_canonical(a, s);
+        FloatParts pb = float32_unpack_canonical(b, s);
+
+        if (!is_quiet ||
+            pa.cls == float_class_snan ||
+            pb.cls == float_class_snan) {
+            s->float_exception_flags |= float_flag_invalid;
+        }
+        return float_relation_unordered;
+    }
+    if (isgreater(af, bf)) {
+        return float_relation_greater;
+    }
+    if (isless(af, bf)) {
+        return float_relation_less;
+    }
+    return float_relation_equal;
+}
+
+int __attribute__((flatten))
+float32_compare(float32 a, float32 b, float_status *s)
+{
+    return fpu_float32_compare(a, b, false, s);
+}
+
+int __attribute__((flatten))
+float32_compare_quiet(float32 a, float32 b, float_status *s)
+{
+    return fpu_float32_compare(a, b, true, s);
+}
 
 /* Multiply A by 2 raised to the power N.  */
 static FloatParts scalbn_decomposed(FloatParts a, int n, float_status *s)
