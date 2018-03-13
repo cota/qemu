@@ -5,6 +5,7 @@
  *   See the COPYING file in the top-level directory.
  */
 #include "qemu/osdep.h"
+#include "qemu/atomic.h"
 
 #include <math.h>
 
@@ -14,6 +15,9 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <time.h>
+
+/* amortize the computation of random inputs */
+#define OPS_PER_ITER     (1000ULL)
 
 enum op {
     OP_ADD,
@@ -29,7 +33,7 @@ static const char * const op_names[] = {
     [OP_DIV] = "div",
 };
 
-static uint64_t n_ops = 1000000;
+static uint64_t n_ops = 10000000;
 static enum op op;
 static const char *precision = "float";
 
@@ -106,21 +110,25 @@ static inline float get_random_double(uint64_t *x)
     return d;
 }
 
-#define GEN_BENCH_2OP(NAME, OP, PRECISION)                      \
-    static PRECISION NAME(void)                                 \
-    {                                                           \
-        uint64_t ra = 0xdeadface;                               \
-        uint64_t rb = 2001 + ra;                                \
-        uint64_t i;                                             \
-        PRECISION total = 0;                                    \
-                                                                \
-        for (i = 0; i < n_ops; i++) {                           \
-            PRECISION a = glue(get_random_,PRECISION)(&ra);     \
-            PRECISION b = glue(get_random_,PRECISION)(&rb);     \
-                                                                \
-            total += a OP b;                                    \
-        }                                                       \
-        return total;                                           \
+/*
+ * Disable optimizations (e.g. "a OP b" outside of the inner loop) with
+ * volatile.
+ */
+#define GEN_BENCH_2OP(NAME, OP, PRECISION)                              \
+    static void NAME(volatile PRECISION *res)                           \
+    {                                                                   \
+        uint64_t ra = 0xdeadface;                                       \
+        uint64_t rb = 2001 + ra;                                        \
+        uint64_t i, j;                                                  \
+                                                                        \
+        for (i = 0; i < n_ops; i += OPS_PER_ITER) {                     \
+            volatile PRECISION a = glue(get_random_,PRECISION)(&ra);    \
+            volatile PRECISION b = glue(get_random_,PRECISION)(&rb);    \
+                                                                        \
+            for (j = 0; j < OPS_PER_ITER; j++) {                        \
+                *res = a OP b;                                          \
+            }                                                           \
+        }                                                               \
     }
 
 GEN_BENCH_2OP(bench_float_add, +, float)
@@ -148,6 +156,10 @@ static void parse_args(int argc, char *argv[])
             exit(0);
         case 'n':
             n_ops = atoll(optarg);
+            if (n_ops < OPS_PER_ITER) {
+                n_ops = OPS_PER_ITER;
+            }
+            n_ops -= n_ops % OPS_PER_ITER;
             break;
         case 'o':
             set_op(optarg);
@@ -163,47 +175,48 @@ static void parse_args(int argc, char *argv[])
     }
 }
 
-#define CALL_BENCH(OP, PRECISION, TOTAL)                        \
-    do {                                                        \
-        switch (OP) {                                           \
-        case OP_ADD:                                            \
-            TOTAL = glue(glue(bench_,PRECISION),_add)();        \
-            break;                                              \
-        case OP_SUB:                                            \
-            TOTAL = glue(glue(bench_,PRECISION),_sub)();        \
-            break;                                              \
-        case OP_MUL:                                            \
-            TOTAL = glue(glue(bench_,PRECISION),_mul)();        \
-            break;                                              \
-        case OP_DIV:                                            \
-            TOTAL = glue(glue(bench_,PRECISION),_div)();        \
-            break;                                              \
-        default:                                                \
-            g_assert_not_reached();                             \
-        }                                                       \
+#define CALL_BENCH(OP, PRECISION, RESP)                 \
+    do {                                                \
+        switch (OP) {                                   \
+        case OP_ADD:                                    \
+            glue(glue(bench_,PRECISION),_add)(RESP);    \
+            break;                                      \
+        case OP_SUB:                                    \
+            glue(glue(bench_,PRECISION),_sub)(RESP);    \
+            break;                                      \
+        case OP_MUL:                                    \
+            glue(glue(bench_,PRECISION),_mul)(RESP);    \
+            break;                                      \
+        case OP_DIV:                                    \
+            glue(glue(bench_,PRECISION),_div)(RESP);    \
+            break;                                      \
+        default:                                        \
+            g_assert_not_reached();                     \
+        }                                               \
     } while (0)
 
 int main(int argc, char *argv[])
 {
     int64_t t0, t1;
-    double total;
+    double resd;
 
     parse_args(argc, argv);
     if (!strcmp(precision, "float")) {
+        float res;
         t0 = get_clock_realtime();
-        CALL_BENCH(op, float, total);
+        CALL_BENCH(op, float, &res);
         t1 = get_clock_realtime();
+        resd = res;
     } else if (!strcmp(precision, "double")) {
         t0 = get_clock_realtime();
-        CALL_BENCH(op, double, total);
+        CALL_BENCH(op, double, &resd);
         t1 = get_clock_realtime();
     } else {
         g_assert_not_reached();
     }
     printf("%.2f MFlops\n", (double)n_ops / (t1 - t0) * 1e3);
-    /* use the variable total so that bench() doesn't get compiled away */
-    if (total) {
-        get_clock_realtime();
+    if (resd) {
+        return 0;
     }
     return 0;
 }
