@@ -743,11 +743,29 @@ float16  __attribute__((flatten)) float16_add(float16 a, float16 b,
 float32 __attribute__((flatten)) float32_add(float32 a, float32 b,
                                              float_status *status)
 {
-    FloatParts pa = float32_unpack_canonical(a, status);
-    FloatParts pb = float32_unpack_canonical(b, status);
-    FloatParts pr = addsub_floats(pa, pb, false, status);
+    float af = *(float *)&a;
+    float bf = *(float *)&b;
 
-    return float32_round_pack_canonical(pr, status);
+    if (likely(isnormal(af) && isnormal(bf) &&
+               status->float_rounding_mode == float_round_nearest_even)) {
+        float res = af + bf;
+
+        if (isinf(res)) {
+            float_raise(float_flag_overflow, status);
+        }
+        if (!(status->float_exception_flags & float_flag_inexact)) {
+            if (res - af != bf || res - bf != af) {
+                float_raise(float_flag_inexact, status);
+            }
+        }
+        return *(float32 *)&res;
+    } else {
+        FloatParts pa = float32_unpack_canonical(a, status);
+        FloatParts pb = float32_unpack_canonical(b, status);
+        FloatParts pr = addsub_floats(pa, pb, false, status);
+
+        return float32_round_pack_canonical(pr, status);
+    }
 }
 
 float64 __attribute__((flatten)) float64_add(float64 a, float64 b,
