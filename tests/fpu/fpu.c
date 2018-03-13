@@ -14,6 +14,8 @@
 enum error {
     ERROR_NONE,
     ERROR_NOT_HANDLED,
+    ERROR_WHITELISTED,
+    ERROR_COMMENT,
     ERROR_INPUT,
     ERROR_RESULT,
     ERROR_EXCEPTIONS,
@@ -88,7 +90,14 @@ struct tester {
     const char *name;
 };
 
-static uint64_t test_stats[2];
+struct whitelist {
+    char **lines;
+    size_t n;
+    GHashTable *ht;
+};
+
+static uint64_t test_stats[4];
+static struct whitelist whitelist;
 
 static inline float u64_to_float(uint64_t v)
 {
@@ -121,7 +130,10 @@ static inline uint64_t double_to_u64(double d)
 
 static inline bool is_err(enum error err)
 {
-    return err != ERROR_NONE && err != ERROR_NOT_HANDLED;
+    return err != ERROR_NONE &&
+        err != ERROR_NOT_HANDLED &&
+        err != ERROR_WHITELISTED &&
+        err != ERROR_COMMENT;
 }
 
 static int host_exceptions_translate(int host_flags)
@@ -645,7 +657,7 @@ static enum error ibm_test_line(const char *line)
 
     /* data lines start with either b32 or d(64|128) */
     if (unlikely(line[0] != 'b' && line[0] != 'd')) {
-        return ERROR_NOT_HANDLED;
+        return ERROR_COMMENT;
     }
     n = sscanf(line, "%63s %63s %63s %63s %63s %63s %63s %63s %63s",
                s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8]);
@@ -750,6 +762,14 @@ static const struct input valid_input_types[] = {
 
 static const struct input *input_type = &valid_input_types[INPUT_FMT_IBM];
 
+static bool line_is_whitelisted(const char *line)
+{
+    if (whitelist.ht == NULL) {
+        return false;
+    }
+    return !!g_hash_table_lookup(whitelist.ht, line);
+}
+
 static void test_file(const char *filename)
 {
     static char line[256];
@@ -767,6 +787,10 @@ static void test_file(const char *filename)
         enum error err;
 
         i++;
+        if (unlikely(line_is_whitelisted(line))) {
+            test_stats[ERROR_WHITELISTED]++;
+            continue;
+        }
         err = input_type->test_line(line);
         if (unlikely(is_err(err))) {
             switch (err) {
@@ -828,6 +852,50 @@ static void set_tester(const char *optarg)
     exit(EXIT_FAILURE);
 }
 
+static void whitelist_add_line(const char *orig_line)
+{
+    char *line;
+    bool inserted;
+
+    if (whitelist.ht == NULL) {
+        whitelist.ht = g_hash_table_new(g_str_hash, g_str_equal);
+    }
+    line = g_hash_table_lookup(whitelist.ht, orig_line);
+    if (unlikely(line != NULL)) {
+        return;
+    }
+    whitelist.n++;
+    whitelist.lines = g_realloc_n(whitelist.lines, whitelist.n, sizeof(line));
+    line = strdup(orig_line);
+    whitelist.lines[whitelist.n - 1] = line;
+    /* if we pass key == val GLib will not reserve space for the value */
+    inserted = g_hash_table_insert(whitelist.ht, line, line);
+    g_assert(inserted);
+}
+
+static void set_whitelist(const char *filename)
+{
+    FILE *fp;
+    static char line[256];
+
+    fp = fopen(filename, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "warning: cannot open white list file '%s': %s\n",
+                filename, strerror(errno));
+        return;
+    }
+    while (fgets(line, sizeof(line), fp)) {
+        if (isspace(line[0]) || line[0] == '#') {
+            continue;
+        }
+        whitelist_add_line(line);
+    }
+    if (fclose(fp)) {
+        fprintf(stderr, "warning: cannot close file '%s': %s\n",
+                filename, strerror(errno));
+    }
+}
+
 static void usage_complete(int argc, char *argv[])
 {
     fprintf(stderr, "Usage: %s [options] file1 [file2 ...]\n", argv[0]);
@@ -835,6 +903,7 @@ static void usage_complete(int argc, char *argv[])
     fprintf(stderr, "  -f = format of the input file(s). Default: %s\n",
             valid_input_types[0].name);
     fprintf(stderr, "  -t = tester. Default: %s\n", valid_testers[0].name);
+    fprintf(stderr, "  -w = path to file with test cases to be whitelisted\n");
 }
 
 static void parse_opts(int argc, char *argv[])
@@ -842,7 +911,7 @@ static void parse_opts(int argc, char *argv[])
     int c;
 
     for (;;) {
-        c = getopt(argc, argv, "f:ht:");
+        c = getopt(argc, argv, "f:ht:w:");
         if (c < 0) {
             return;
         }
@@ -855,6 +924,9 @@ static void parse_opts(int argc, char *argv[])
             exit(EXIT_SUCCESS);
         case 't':
             set_tester(optarg);
+            break;
+        case 'w':
+            set_whitelist(optarg);
             break;
         }
     }
@@ -873,7 +945,8 @@ int main(int argc, char *argv[])
     for (i = optind; i < argc; i++) {
         test_file(argv[i]);
     }
-    printf("All tests OK. Passed: %"PRIu64", not handled: %"PRIu64"\n",
-           test_stats[ERROR_NONE], test_stats[ERROR_NOT_HANDLED]);
+    printf("All tests OK. Passed: %"PRIu64", not handled: %"PRIu64", whitelisted: %"PRIu64"\n",
+           test_stats[ERROR_NONE], test_stats[ERROR_NOT_HANDLED],
+           test_stats[ERROR_WHITELISTED]);
     return 0;
 }
