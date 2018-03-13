@@ -47,16 +47,18 @@ enum op {
     OP_SQRT,
     OP_MINNUM,
     OP_MAXNUM,
+    OP_MAXNUMMAG,
 };
 
 static const struct op_desc ops[] = {
-    [OP_ADD] =      { "+", 2 },
-    [OP_SUB] =      { "-", 2 },
-    [OP_MUL] =      { "*", 2 },
-    [OP_DIV] =      { "/", 2 },
-    [OP_SQRT] =     { "V", 1 },
-    [OP_MINNUM] =   { "<C", 2 },
-    [OP_MAXNUM] =   { ">C", 2 },
+    [OP_ADD] =       { "+", 2 },
+    [OP_SUB] =       { "-", 2 },
+    [OP_MUL] =       { "*", 2 },
+    [OP_DIV] =       { "/", 2 },
+    [OP_SQRT] =      { "V", 1 },
+    [OP_MINNUM] =    { "<C", 2 },
+    [OP_MAXNUM] =    { ">C", 2 },
+    [OP_MAXNUMMAG] = { ">A", 2 },
 };
 
 struct test_op {
@@ -266,6 +268,9 @@ static enum error soft_tester(const struct test_op *t)
             break;
         case OP_MAXNUM:
             res = float32_maxnum(a, b, &status);
+            break;
+        case OP_MAXNUMMAG:
+            res = float32_maxnummag(a, b, &status);
             break;
         default:
             return ERROR_NOT_HANDLED; /* XXX */
