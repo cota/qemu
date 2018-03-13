@@ -273,6 +273,51 @@ static enum error host_tester(const struct test_op *t)
         }
         res64 = float_to_u64(res);
         result_is_nan = isnan(res);
+    } else if (t->prec == PREC_DOUBLE) {
+        double a = u64_to_double(t->operands[0]);
+        double b = u64_to_double(t->operands[1]);
+        double res;
+
+        switch (t->op) {
+        case OP_ADD:
+            res = a + b;
+            break;
+        case OP_SUB:
+            res = a - b;
+            break;
+        case OP_MUL:
+            res = a * b;
+            break;
+        case OP_MULADD:
+        {
+            double c = u64_to_double(t->operands[2]);
+
+            res = fma(a, b, c);
+            break;
+        }
+        case OP_DIV:
+            res = a / b;
+            break;
+        case OP_SQRT:
+            res = sqrt(a);
+            break;
+        case OP_ABS:
+            res = fabs(a);
+            break;
+        case OP_IS_NAN:
+            res = !!isnan(a);
+            break;
+        case OP_IS_INF:
+            res = !!isinf(a);
+            break;
+        default:
+            return ERROR_NOT_HANDLED;
+        }
+        if (t->exceptions) {
+            flags = host_get_exceptions();
+        }
+        res64 = double_to_u64(res);
+        result_is_nan = isnan(res);
     } else {
         return ERROR_NOT_HANDLED; /* XXX */
     }
@@ -347,6 +392,62 @@ static enum error soft_tester(const struct test_op *t)
         }
         res64 = res;
         result_is_nan = isnan(*(float *)&res);
+    } else if (t->prec == PREC_DOUBLE) {
+        float64 a = t->operands[0];
+        float64 b = t->operands[1];
+
+        switch (t->op) {
+        case OP_ADD:
+            res64 = float64_add(a, b, &status);
+            break;
+        case OP_SUB:
+            res64 = float64_sub(a, b, &status);
+            break;
+        case OP_MUL:
+            res64 = float64_mul(a, b, &status);
+            break;
+        case OP_MULADD:
+        {
+            float64 c = t->operands[2];
+
+            res64 = float64_muladd(a, b, c, 0, &status);
+            break;
+        }
+        case OP_DIV:
+            res64 = float64_div(a, b, &status);
+            break;
+        case OP_SQRT:
+            res64 = float64_sqrt(a, &status);
+            break;
+        case OP_MINNUM:
+            res64 = float64_minnum(a, b, &status);
+            break;
+        case OP_MAXNUM:
+            res64 = float64_maxnum(a, b, &status);
+            break;
+        case OP_MAXNUMMAG:
+            res64 = float64_maxnummag(a, b, &status);
+            break;
+        case OP_IS_NAN:
+        {
+            double d = !!float64_is_any_nan(a);
+
+            res64 = double_to_u64(d);
+            break;
+        }
+        case OP_IS_INF:
+        {
+            double d = !!float64_is_infinity(a);
+
+            res64 = double_to_u64(d);
+            break;
+        }
+        case OP_ABS:
+            /* Fall-through: float64_abs does not handle NaN's */
+        default:
+            return ERROR_NOT_HANDLED;
+        }
+        result_is_nan = isnan(*(double *)&res64);
     } else {
         return ERROR_NOT_HANDLED; /* XXX */
     }
@@ -485,11 +586,8 @@ ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret, bool *is_nan)
             *ret = h;
             return 0;
         }
-        if (prec == PREC_DOUBLE) {
-            return 0; /* XXX */
-        }
-        g_assert_not_reached();
-    } else if (strchr(p, 'E') || strchr(p, 'e')) {
+        return 1; /* only d32's use this format */
+    } else if (strchr(p, 'e')) {
         char *pos;
 
         if (prec == PREC_FLOAT) {
@@ -502,9 +600,15 @@ ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret, bool *is_nan)
             return 0;
         }
         if (prec == PREC_DOUBLE) {
-            return 0; /* XXX */
+            double d = strtod(p, &pos);
+
+            if (*pos) {
+                return 1;
+            }
+            *ret = double_to_u64(d);
+            return 0;
         }
-        g_assert_not_reached();
+        return 0;
     } else if (!strcmp(p, "0x0")) {
         if (prec == PREC_FLOAT) {
             *ret = float_to_u64(0.0);
