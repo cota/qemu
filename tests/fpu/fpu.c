@@ -180,34 +180,8 @@ static enum error tester_check(const struct test_op *t, uint64_t res64,
         }
     }
     if (t->exceptions && flags != t->exceptions) {
-        if (t->exceptions == (float_flag_inexact | float_flag_underflow) &&
-            flags == float_flag_inexact) {
-            /*
-             * this is probably OK -- some ppc hosts set the underflow
-             * bit and others don't.
-             */
-        } else if (unlikely(t->exceptions == float_flag_invalid &&
-                            t->op == OP_MULADD)) {
-            /*
-             * muladd(Zero, Inf, NaN) does not have to raise the invalid
-             * flag, despite what the test input might expect.
-             */
-            if (t->prec == PREC_FLOAT) {
-                float a = u64_to_float(t->operands[0]);
-                float b = u64_to_float(t->operands[1]);
-                float c = u64_to_float(t->operands[2]);
-
-                /* whitelist Zero,Inf,NaN and Inf,Zero,NaN */
-                if (!((fpclassify(a) == FP_ZERO && isinf(b) && isnan(c)) ||
-                      (isinf(a) && fpclassify(b) == FP_ZERO && isnan(c)))) {
-                    err = ERROR_EXCEPTIONS;
-                    goto out;
-                }
-            }
-        } else {
-            err = ERROR_EXCEPTIONS;
-            goto out;
-        }
+        err = ERROR_EXCEPTIONS;
+        goto out;
     }
 
  out:
