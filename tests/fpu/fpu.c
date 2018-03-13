@@ -48,6 +48,8 @@ enum op {
     OP_MINNUM,
     OP_MAXNUM,
     OP_MAXNUMMAG,
+    OP_IS_NAN,
+    OP_IS_INF,
 };
 
 static const struct op_desc ops[] = {
@@ -59,6 +61,8 @@ static const struct op_desc ops[] = {
     [OP_MINNUM] =    { "<C", 2 },
     [OP_MAXNUM] =    { ">C", 2 },
     [OP_MAXNUMMAG] = { ">A", 2 },
+    [OP_IS_NAN] =    { "?N", 1 },
+    [OP_IS_INF] =    { "?i", 1 },
 };
 
 struct test_op {
@@ -218,8 +222,14 @@ static enum error host_tester(const struct test_op *t)
         case OP_SQRT:
             res = sqrt(a);
             break;
+        case OP_IS_NAN:
+            res = !!isnan(a);
+            break;
+        case OP_IS_INF:
+            res = !!isinf(a);
+            break;
         default:
-            g_assert_not_reached();
+            return ERROR_NOT_HANDLED;
         }
         if (t->exceptions) {
             flags = host_get_exceptions();
@@ -272,8 +282,22 @@ static enum error soft_tester(const struct test_op *t)
         case OP_MAXNUMMAG:
             res = float32_maxnummag(a, b, &status);
             break;
+        case OP_IS_NAN:
+        {
+            float f = !!float32_is_any_nan(a);
+
+            res = float_to_u64(f);
+            break;
+        }
+        case OP_IS_INF:
+        {
+            float f = !!float32_is_infinity(a);
+
+            res = float_to_u64(f);
+            break;
+        }
         default:
-            return ERROR_NOT_HANDLED; /* XXX */
+            return ERROR_NOT_HANDLED;
         }
         res64 = res;
         result_is_nan = isnan(*(float *)&res);
@@ -435,6 +459,24 @@ ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret, bool *is_nan)
             return 0; /* XXX */
         }
         g_assert_not_reached();
+    } else if (!strcmp(p, "0x0")) {
+        if (prec == PREC_FLOAT) {
+            *ret = float_to_u64(0.0);
+        } else if (prec == PREC_DOUBLE) {
+            *ret = double_to_u64(0.0);
+        } else {
+            g_assert_not_reached();
+        }
+        return 0;
+    } else if (!strcmp(p, "0x1")) {
+        if (prec == PREC_FLOAT) {
+            *ret = float_to_u64(1.0);
+        } else if (prec == PREC_DOUBLE) {
+            *ret = double_to_u64(1.0);
+        } else {
+            g_assert_not_reached();
+        }
+        return 0;
     }
     return 1;
 }
