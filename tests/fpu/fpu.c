@@ -254,7 +254,7 @@ static enum error host_tester(const struct test_op *t)
             res = a / b;
             break;
         case OP_SQRT:
-            res = sqrt(a);
+            res = sqrtf(a);
             break;
         case OP_ABS:
             res = fabsf(a);
