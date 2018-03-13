@@ -740,42 +740,80 @@ float16  __attribute__((flatten)) float16_add(float16 a, float16 b,
     return float16_round_pack_canonical(pr, status);
 }
 
+static inline float32
+float32_addsub(float32 a32, float32 b32, bool subtract, float_status *status)
+{
+    float a = *(float *)&a32;
+    float b = *(float *)&b32;
+
+    if (likely(isnormal(a) && isnormal(b) &&
+               status->float_rounding_mode == float_round_nearest_even)) {
+        float r;
+
+        if (subtract) {
+            b = -b;
+        }
+        r = a + b;
+        if (isinf(r)) {
+            status->float_exception_flags |= float_flag_overflow;
+        }
+        if (!(status->float_exception_flags & float_flag_inexact)) {
+            if (r - a != b || r - b != a) {
+                status->float_exception_flags |= float_flag_inexact;
+            }
+        }
+        return *(float32 *)&r;
+    } else {
+        FloatParts pa = float32_unpack_canonical(a32, status);
+        FloatParts pb = float32_unpack_canonical(b32, status);
+        FloatParts pr = addsub_floats(pa, pb, subtract, status);
+
+        return float32_round_pack_canonical(pr, status);
+    }
+}
+
 float32 __attribute__((flatten)) float32_add(float32 a, float32 b,
                                              float_status *status)
 {
-    float af = *(float *)&a;
-    float bf = *(float *)&b;
+    return float32_addsub(a, b, false, status);
+}
 
-    if (likely(isnormal(af) && isnormal(bf) &&
+static inline float64
+float64_addsub(float64 a64, float64 b64, bool subtract, float_status *status)
+{
+    double a = *(double *)&a64;
+    double b = *(double *)&b64;
+
+    if (likely(isnormal(a) && isnormal(b) &&
                status->float_rounding_mode == float_round_nearest_even)) {
-        float res = af + bf;
+        double r;
 
-        if (isinf(res)) {
-            float_raise(float_flag_overflow, status);
+        if (subtract) {
+            b = -b;
+        }
+        r = a + b;
+        if (isinf(r)) {
+            status->float_exception_flags |= float_flag_overflow;
         }
         if (!(status->float_exception_flags & float_flag_inexact)) {
-            if (res - af != bf || res - bf != af) {
-                float_raise(float_flag_inexact, status);
+            if (r - a != b || r - b != a) {
+                status->float_exception_flags |= float_flag_inexact;
             }
         }
-        return *(float32 *)&res;
+        return *(float64 *)&r;
     } else {
-        FloatParts pa = float32_unpack_canonical(a, status);
-        FloatParts pb = float32_unpack_canonical(b, status);
-        FloatParts pr = addsub_floats(pa, pb, false, status);
+        FloatParts pa = float64_unpack_canonical(a64, status);
+        FloatParts pb = float64_unpack_canonical(b64, status);
+        FloatParts pr = addsub_floats(pa, pb, subtract, status);
 
-        return float32_round_pack_canonical(pr, status);
+        return float64_round_pack_canonical(pr, status);
     }
 }
 
 float64 __attribute__((flatten)) float64_add(float64 a, float64 b,
                                              float_status *status)
 {
-    FloatParts pa = float64_unpack_canonical(a, status);
-    FloatParts pb = float64_unpack_canonical(b, status);
-    FloatParts pr = addsub_floats(pa, pb, false, status);
-
-    return float64_round_pack_canonical(pr, status);
+    return float64_addsub(a, b, false, status);
 }
 
 float16 __attribute__((flatten)) float16_sub(float16 a, float16 b,
@@ -791,21 +829,13 @@ float16 __attribute__((flatten)) float16_sub(float16 a, float16 b,
 float32 __attribute__((flatten)) float32_sub(float32 a, float32 b,
                                              float_status *status)
 {
-    FloatParts pa = float32_unpack_canonical(a, status);
-    FloatParts pb = float32_unpack_canonical(b, status);
-    FloatParts pr = addsub_floats(pa, pb, true, status);
-
-    return float32_round_pack_canonical(pr, status);
+    return float32_addsub(a, b, true, status);
 }
 
 float64 __attribute__((flatten)) float64_sub(float64 a, float64 b,
                                              float_status *status)
 {
-    FloatParts pa = float64_unpack_canonical(a, status);
-    FloatParts pb = float64_unpack_canonical(b, status);
-    FloatParts pr = addsub_floats(pa, pb, true, status);
-
-    return float64_round_pack_canonical(pr, status);
+    return float64_addsub(a, b, true, status);
 }
 
 /*
