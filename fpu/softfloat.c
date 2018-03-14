@@ -909,14 +909,34 @@ float32 __attribute__((flatten)) float32_mul(float32 a, float32 b,
     return float32_round_pack_canonical(pr, status);
 }
 
-float64 __attribute__((flatten)) float64_mul(float64 a, float64 b,
-                                             float_status *status)
+static float64 soft_f64_mul(float64 a, float64 b, float_status *status)
 {
     FloatParts pa = float64_unpack_canonical(a, status);
     FloatParts pb = float64_unpack_canonical(b, status);
     FloatParts pr = mul_floats(pa, pb, status);
 
     return float64_round_pack_canonical(pr, status);
+}
+
+float64 float64_mul(float64 a64, float64 b64, float_status *status)
+{
+    double a = *(double *)&a64;
+    double b = *(double *)&b64;
+
+    if (likely(isnormal(a) && isnormal(b) &&
+               status->float_rounding_mode == float_round_nearest_even &&
+               status->float_exception_flags & float_flag_inexact)) {
+        double r = a * b;
+
+        if (unlikely(isinf(r))) {
+            status->float_exception_flags |= float_flag_overflow | float_flag_inexact;
+        } else if (unlikely(fabs(r) <= DBL_MIN)) {
+            return soft_f64_mul(a64, b64, status);
+        }
+        return *(float64 *)&r;
+    } else {
+        return soft_f64_mul(a64, b64, status);
+    }
 }
 
 /*
