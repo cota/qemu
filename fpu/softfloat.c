@@ -909,7 +909,8 @@ float32 __attribute__((flatten)) float32_mul(float32 a, float32 b,
     return float32_round_pack_canonical(pr, status);
 }
 
-static float64 soft_f64_mul(float64 a, float64 b, float_status *status)
+static float64 __attribute__((flatten))
+soft_f64_mul(float64 a, float64 b, float_status *status)
 {
     FloatParts pa = float64_unpack_canonical(a, status);
     FloatParts pb = float64_unpack_canonical(b, status);
