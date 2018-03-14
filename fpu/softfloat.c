@@ -915,8 +915,8 @@ float32 float32_mul(float32 a32, float32 b32, float_status *status)
     float b = *(float *)&b32;
 
     if (likely(isnormal(a) && isnormal(b) &&
-               status->float_rounding_mode == float_round_nearest_even &&
-               status->float_exception_flags & float_flag_inexact)) {
+               status->float_exception_flags & float_flag_inexact &&
+               status->float_rounding_mode == float_round_nearest_even)) {
         float r = a * b;
 
         if (unlikely(isinf(r))) {
@@ -946,8 +946,8 @@ float64 float64_mul(float64 a64, float64 b64, float_status *status)
     double b = *(double *)&b64;
 
     if (likely(isnormal(a) && isnormal(b) &&
-               status->float_rounding_mode == float_round_nearest_even &&
-               status->float_exception_flags & float_flag_inexact)) {
+               status->float_exception_flags & float_flag_inexact &&
+               status->float_rounding_mode == float_round_nearest_even)) {
         double r = a * b;
 
         if (unlikely(isinf(r))) {
