@@ -98,6 +98,7 @@ struct whitelist {
 
 static uint64_t test_stats[4];
 static struct whitelist whitelist;
+static uint8_t default_exceptions;
 
 static inline float u64_to_float(uint64_t v)
 {
@@ -163,6 +164,37 @@ static inline uint8_t host_get_exceptions(void)
     return host_exceptions_translate(fetestexcept(FE_ALL_EXCEPT));
 }
 
+static void host_set_exceptions(uint8_t flags)
+{
+    int host_flags = 0;
+
+    if (flags & float_flag_inexact) {
+        host_flags |= FE_INEXACT;
+    }
+    if (flags & float_flag_underflow) {
+        host_flags |= FE_UNDERFLOW;
+    }
+    if (flags & float_flag_overflow) {
+        host_flags |= FE_OVERFLOW;
+    }
+    if (flags & float_flag_divbyzero) {
+        host_flags |= FE_DIVBYZERO;
+    }
+    if (flags & float_flag_invalid) {
+        host_flags |= FE_INVALID;
+    }
+    feraiseexcept(host_flags);
+}
+
+#define FMT_EXCEPTIONS "%s%s%s%s%s%s"
+#define PR_EXCEPTIONS(x)                                \
+        ((x) ? "" : "none"),                            \
+        (((x) & float_flag_inexact)   ? "x" : ""),      \
+        (((x) & float_flag_underflow) ? "u" : ""),      \
+        (((x) & float_flag_overflow)  ? "o" : ""),      \
+        (((x) & float_flag_divbyzero) ? "z" : ""),      \
+        (((x) & float_flag_invalid)   ? "i" : "")
+
 static enum error tester_check(const struct test_op *t, uint64_t res64,
                                bool res_is_nan, uint8_t flags)
 {
@@ -179,7 +211,7 @@ static enum error tester_check(const struct test_op *t, uint64_t res64,
             goto out;
         }
     }
-    if (t->exceptions && flags != t->exceptions) {
+    if (t->exceptions && flags != (t->exceptions | default_exceptions)) {
         err = ERROR_EXCEPTIONS;
         goto out;
     }
@@ -196,8 +228,9 @@ static enum error tester_check(const struct test_op *t, uint64_t res64,
         fprintf(stderr, ", expected: 0x%" PRIx64 ", returned: 0x%" PRIx64,
                 t->expected_result, res64);
         if (err == ERROR_EXCEPTIONS) {
-            fprintf(stderr, ", expected exceptions: 0x%x, returned: 0x%x",
-                    t->exceptions, flags);
+            fprintf(stderr, ", expected exceptions: " FMT_EXCEPTIONS
+                    ", returned: " FMT_EXCEPTIONS,
+                    PR_EXCEPTIONS(t->exceptions), PR_EXCEPTIONS(flags));
         }
         fprintf(stderr, "\n");
     }
@@ -210,8 +243,9 @@ static enum error host_tester(const struct test_op *t)
     bool result_is_nan;
     uint8_t flags = 0;
 
-    if (t->exceptions) {
-        feclearexcept(FE_ALL_EXCEPT);
+    feclearexcept(FE_ALL_EXCEPT);
+    if (default_exceptions) {
+        host_set_exceptions(default_exceptions);
     }
 
     if (t->prec == PREC_FLOAT) {
@@ -254,9 +288,7 @@ static enum error host_tester(const struct test_op *t)
         default:
             return ERROR_NOT_HANDLED;
         }
-        if (t->exceptions) {
-            flags = host_get_exceptions();
-        }
+        flags = host_get_exceptions();
         res64 = float_to_u64(res);
         result_is_nan = isnan(res);
     } else if (t->prec == PREC_DOUBLE) {
@@ -299,9 +331,7 @@ static enum error host_tester(const struct test_op *t)
         default:
             return ERROR_NOT_HANDLED;
         }
-        if (t->exceptions) {
-            flags = host_get_exceptions();
-        }
+        flags = host_get_exceptions();
         res64 = double_to_u64(res);
         result_is_nan = isnan(res);
     } else {
@@ -318,7 +348,7 @@ static enum error soft_tester(const struct test_op *t)
     bool result_is_nan;
 
     status.float_rounding_mode = t->round;
-    status.float_exception_flags = 0;
+    status.float_exception_flags = default_exceptions;
 
     if (t->prec == PREC_FLOAT) {
         float32 a = t->operands[0];
@@ -707,8 +737,12 @@ static enum error ibm_test_line(const char *line)
         t.expected_result_is_valid = true;
     }
 
-    /* the expected exceptions field is optional */
+    /*
+     * A 0 here means "do not check the exceptions", i.e. it does NOT mean
+     * "there should be no exceptions raised".
+     */
     t.exceptions = 0;
+    /* the expected exceptions field is optional */
     if (field == n - 1) {
         p = s[field++];
         if (ibm_get_exceptions(p, &t.exceptions)) {
@@ -870,10 +904,19 @@ static void set_whitelist(const char *filename)
     }
 }
 
+static void set_default_exceptions(const char *str)
+{
+    if (ibm_get_exceptions(str, &default_exceptions)) {
+        fprintf(stderr, "Invalid exception '%s'\n", str);
+        exit(EXIT_FAILURE);
+    }
+}
+
 static void usage_complete(int argc, char *argv[])
 {
     fprintf(stderr, "Usage: %s [options] file1 [file2 ...]\n", argv[0]);
     fprintf(stderr, "options:\n");
+    fprintf(stderr, "  -e = default exception flags (xiozu). Default: 0\n");
     fprintf(stderr, "  -f = format of the input file(s). Default: %s\n",
             valid_input_types[0].name);
     fprintf(stderr, "  -t = tester. Default: %s\n", valid_testers[0].name);
@@ -885,11 +928,14 @@ static void parse_opts(int argc, char *argv[])
     int c;
 
     for (;;) {
-        c = getopt(argc, argv, "f:ht:w:");
+        c = getopt(argc, argv, "e:f:ht:w:");
         if (c < 0) {
             return;
         }
         switch (c) {
+        case 'e':
+            set_default_exceptions(optarg);
+            break;
         case 'f':
             set_input_fmt(optarg);
             break;
