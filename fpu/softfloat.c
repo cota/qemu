@@ -741,7 +741,7 @@ float16  __attribute__((flatten)) float16_add(float16 a, float16 b,
 }
 
 static inline float32
-float32_addsub(float32 a32, float32 b32, bool subtract, float_status *status)
+fpu_f32_addsub(float32 a32, float32 b32, bool subtract, float_status *status)
 {
     float a = *(float *)&a32;
     float b = *(float *)&b32;
@@ -775,11 +775,11 @@ float32_addsub(float32 a32, float32 b32, bool subtract, float_status *status)
 float32 __attribute__((flatten)) float32_add(float32 a, float32 b,
                                              float_status *status)
 {
-    return float32_addsub(a, b, false, status);
+    return fpu_f32_addsub(a, b, false, status);
 }
 
 static inline float64
-float64_addsub(float64 a64, float64 b64, bool subtract, float_status *status)
+fpu_f64_addsub(float64 a64, float64 b64, bool subtract, float_status *status)
 {
     double a = *(double *)&a64;
     double b = *(double *)&b64;
@@ -813,7 +813,7 @@ float64_addsub(float64 a64, float64 b64, bool subtract, float_status *status)
 float64 __attribute__((flatten)) float64_add(float64 a, float64 b,
                                              float_status *status)
 {
-    return float64_addsub(a, b, false, status);
+    return fpu_f64_addsub(a, b, false, status);
 }
 
 float16 __attribute__((flatten)) float16_sub(float16 a, float16 b,
@@ -829,13 +829,13 @@ float16 __attribute__((flatten)) float16_sub(float16 a, float16 b,
 float32 __attribute__((flatten)) float32_sub(float32 a, float32 b,
                                              float_status *status)
 {
-    return float32_addsub(a, b, true, status);
+    return fpu_f32_addsub(a, b, true, status);
 }
 
 float64 __attribute__((flatten)) float64_sub(float64 a, float64 b,
                                              float_status *status)
 {
-    return float64_addsub(a, b, true, status);
+    return fpu_f64_addsub(a, b, true, status);
 }
 
 /*
