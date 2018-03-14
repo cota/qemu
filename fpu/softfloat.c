@@ -2109,16 +2109,36 @@ float16 __attribute__((flatten)) float16_sqrt(float16 a, float_status *status)
 
 float32 __attribute__((flatten)) float32_sqrt(float32 a, float_status *status)
 {
-    FloatParts pa = float32_unpack_canonical(a, status);
-    FloatParts pr = sqrt_float(pa, status, &float32_params);
-    return float32_round_pack_canonical(pr, status);
+    float f = *(float *)&a;
+
+    if (likely(isnormal(f) && !signbit(f) &&
+               status->float_exception_flags & float_flag_inexact &&
+               status->float_rounding_mode == float_round_nearest_even)) {
+        float r = sqrtf(f);
+
+        return *(float32 *)&r;
+    } else {
+        FloatParts pa = float32_unpack_canonical(a, status);
+        FloatParts pr = sqrt_float(pa, status, &float32_params);
+        return float32_round_pack_canonical(pr, status);
+    }
 }
 
 float64 __attribute__((flatten)) float64_sqrt(float64 a, float_status *status)
 {
-    FloatParts pa = float64_unpack_canonical(a, status);
-    FloatParts pr = sqrt_float(pa, status, &float64_params);
-    return float64_round_pack_canonical(pr, status);
+    double d = *(double *)&a;
+
+    if (likely(isnormal(d) && !signbit(d) &&
+               status->float_exception_flags & float_flag_inexact &&
+               status->float_rounding_mode == float_round_nearest_even)) {
+        double r = sqrt(d);
+
+        return *(float64 *)&r;
+    } else {
+        FloatParts pa = float64_unpack_canonical(a, status);
+        FloatParts pr = sqrt_float(pa, status, &float64_params);
+        return float64_round_pack_canonical(pr, status);
+    }
 }
 
 
