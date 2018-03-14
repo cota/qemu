@@ -930,7 +930,7 @@ float64 float64_mul(float64 a64, float64 b64, float_status *status)
         double r = a * b;
 
         if (unlikely(isinf(r))) {
-            status->float_exception_flags |= float_flag_overflow | float_flag_inexact;
+            status->float_exception_flags |= float_flag_overflow;
         } else if (unlikely(fabs(r) <= DBL_MIN)) {
             return soft_f64_mul(a64, b64, status);
         }
