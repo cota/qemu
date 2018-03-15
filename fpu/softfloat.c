@@ -759,7 +759,7 @@ fpu_f32_addsub(float32 a32, float32 b32, bool subtract, float_status *status)
         if (float32_is_infinity(r32)) {
             status->float_exception_flags |= float_flag_overflow;
         }
-        if (!(status->float_exception_flags & float_flag_inexact)) {
+        if (unlikely(!(status->float_exception_flags & float_flag_inexact))) {
             if (r - a != b || r - b != a) {
                 status->float_exception_flags |= float_flag_inexact;
             }
@@ -799,7 +799,7 @@ fpu_f64_addsub(float64 a64, float64 b64, bool subtract, float_status *status)
         if (float64_is_infinity(r64)) {
             status->float_exception_flags |= float_flag_overflow;
         }
-        if (!(status->float_exception_flags & float_flag_inexact)) {
+        if (unlikely(!(status->float_exception_flags & float_flag_inexact))) {
             if (r - a != b || r - b != a) {
                 status->float_exception_flags |= float_flag_inexact;
             }
