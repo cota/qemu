@@ -34,6 +34,7 @@ enum precision {
     PREC_FLOAT,
     PREC_DOUBLE,
     PREC_QUAD,
+    PREC_FLOAT_TO_DOUBLE,
 };
 
 struct op_desc {
@@ -54,6 +55,7 @@ enum op {
     OP_ABS,
     OP_IS_NAN,
     OP_IS_INF,
+    OP_FLOAT_TO_DOUBLE,
 };
 
 static const struct op_desc ops[] = {
@@ -69,6 +71,7 @@ static const struct op_desc ops[] = {
     [OP_ABS] =       { "A", 1 },
     [OP_IS_NAN] =    { "?N", 1 },
     [OP_IS_INF] =    { "?i", 1 },
+    [OP_FLOAT_TO_DOUBLE] = { "cff", 1 },
 };
 
 struct test_op {
@@ -334,6 +337,20 @@ static enum error host_tester(const struct test_op *t)
         flags = host_get_exceptions();
         res64 = double_to_u64(res);
         result_is_nan = isnan(res);
+    } else if (t->prec == PREC_FLOAT_TO_DOUBLE) {
+        float a = u64_to_float(t->operands[0]);
+        double res;
+
+        switch (t->op) {
+        case OP_FLOAT_TO_DOUBLE:
+            res = a;
+            break;
+        default:
+            return ERROR_NOT_HANDLED;
+        }
+        flags = host_get_exceptions();
+        res64 = double_to_u64(res);
+        result_is_nan = isnan(res);
     } else {
         return ERROR_NOT_HANDLED; /* XXX */
     }
@@ -460,6 +477,17 @@ static enum error soft_tester(const struct test_op *t)
         }
         case OP_ABS:
             /* Fall-through: float64_abs does not handle NaN's */
+        default:
+            return ERROR_NOT_HANDLED;
+        }
+        result_is_nan = isnan(*(double *)&res64);
+    } else if (t->prec == PREC_FLOAT_TO_DOUBLE) {
+        float32 a = t->operands[0];
+
+        switch (t->op) {
+        case OP_FLOAT_TO_DOUBLE:
+            res64 = float32_to_float64(a, &status);
+            break;
         default:
             return ERROR_NOT_HANDLED;
         }
@@ -601,8 +629,31 @@ ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret, bool *is_nan)
             h |= significand;
             *ret = h;
             return 0;
+        } else if (prec == PREC_DOUBLE) {
+            uint64_t exponent;
+            uint64_t significand;
+            uint64_t h;
+
+            significand = strtoul(&p[3], &pos, 16);
+            if (*pos != 'P') {
+                return 1;
+            }
+            pos++;
+            exponent = strtol(pos, &pos, 10) + 1023;
+            if (pos != p + len) {
+                return 1;
+            }
+            if (denormal) {
+                return 1; /* XXX */
+            }
+            h = negative ? (1ULL << 63) : 0;
+            h |= exponent << 52;
+            h |= significand;
+            *ret = h;
+            return 0;
+        } else { /* XXX */
+            return 1;
         }
-        return 1; /* only d32's use this format */
     } else if (strchr(p, 'e')) {
         char *pos;
 
@@ -647,6 +698,19 @@ ibm_fp_hex(const char *p, enum precision prec, uint64_t *ret, bool *is_nan)
     return 1;
 }
 
+static int find_op(const char *name, enum op *op)
+{
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(ops); i++) {
+        if (strcmp(ops[i].name, name) == 0) {
+            *op = i;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* Syntax of IBM FP test cases:
  * https://www.research.ibm.com/haifa/projects/verification/fpgen/syntax.txt
  */
@@ -674,24 +738,24 @@ static enum error ibm_test_line(const char *line)
     if (unlikely(strlen(p) < 4)) {
         return ERROR_INPUT;
     }
-    if (strncmp("b32", p, 3) == 0) {
-        t.prec = PREC_FLOAT;
-    } else if (strncmp("d64", p, 3) == 0) {
-        t.prec = PREC_DOUBLE;
-    } else if (strncmp("d128", p, 3) == 0) {
-        return ERROR_NOT_HANDLED; /* XXX */
-    } else {
-        return ERROR_INPUT;
-    }
-
-    for (i = 0; i < ARRAY_SIZE(ops); i++) {
-        if (strcmp(ops[i].name, &p[3]) == 0) {
-            t.op = i;
-            break;
+    if (strcmp("b32b64cff", p) == 0) {
+        t.prec = PREC_FLOAT_TO_DOUBLE;
+        if (find_op(&p[6], &t.op)) {
+            return ERROR_NOT_HANDLED;
         }
-    }
-    if (i == ARRAY_SIZE(ops)) {
-        return ERROR_NOT_HANDLED;
+    } else {
+        if (strncmp("b32", p, 3) == 0) {
+            t.prec = PREC_FLOAT;
+        } else if (strncmp("d64", p, 3) == 0) {
+            t.prec = PREC_DOUBLE;
+        } else if (strncmp("d128", p, 3) == 0) {
+            return ERROR_NOT_HANDLED; /* XXX */
+        } else {
+            return ERROR_INPUT;
+        }
+        if (find_op(&p[3], &t.op)) {
+            return ERROR_NOT_HANDLED;
+        }
     }
 
     field = 1;
@@ -715,8 +779,10 @@ static enum error ibm_test_line(const char *line)
     }
 
     for (i = 0; i < ops[t.op].n_operands; i++) {
+        enum precision prec = t.prec == PREC_FLOAT_TO_DOUBLE ? PREC_FLOAT : t.prec;
+
         p = s[field++];
-        if (ibm_fp_hex(p, t.prec, &t.operands[i], NULL)) {
+        if (ibm_fp_hex(p, prec, &t.operands[i], NULL)) {
             return ERROR_INPUT;
         }
     }
@@ -730,8 +796,10 @@ static enum error ibm_test_line(const char *line)
     if (unlikely(strcmp("#", p) == 0)) {
         t.expected_result_is_valid = false;
     } else {
+        enum precision prec = t.prec == PREC_FLOAT_TO_DOUBLE ? PREC_DOUBLE : t.prec;
+
         t.expected_nan = false;
-        if (ibm_fp_hex(p, t.prec, &t.expected_result, &t.expected_nan)) {
+        if (ibm_fp_hex(p, prec, &t.expected_result, &t.expected_nan)) {
             return ERROR_INPUT;
         }
         t.expected_result_is_valid = true;
