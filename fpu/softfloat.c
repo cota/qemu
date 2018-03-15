@@ -743,18 +743,20 @@ float16  __attribute__((flatten)) float16_add(float16 a, float16 b,
 static inline float32
 fpu_f32_addsub(float32 a32, float32 b32, bool subtract, float_status *status)
 {
-    float a = *(float *)&a32;
-    float b = *(float *)&b32;
-
-    if (likely(isnormal(a) && isnormal(b) &&
+    if (likely((float32_is_normal(a32) || float32_is_zero(a32)) &&
+               (float32_is_normal(b32) || float32_is_zero(b32)) &&
                status->float_rounding_mode == float_round_nearest_even)) {
+        float a = *(float *)&a32;
+        float b = *(float *)&b32;
         float r;
+        float32 r32;
 
         if (subtract) {
             b = -b;
         }
         r = a + b;
-        if (isinf(r)) {
+        r32 = *(float32 *)&r;
+        if (float32_is_infinity(r32)) {
             status->float_exception_flags |= float_flag_overflow;
         }
         if (!(status->float_exception_flags & float_flag_inexact)) {
@@ -762,7 +764,7 @@ fpu_f32_addsub(float32 a32, float32 b32, bool subtract, float_status *status)
                 status->float_exception_flags |= float_flag_inexact;
             }
         }
-        return *(float32 *)&r;
+        return r32;
     } else {
         FloatParts pa = float32_unpack_canonical(a32, status);
         FloatParts pb = float32_unpack_canonical(b32, status);
@@ -781,18 +783,20 @@ float32 __attribute__((flatten)) float32_add(float32 a, float32 b,
 static inline float64
 fpu_f64_addsub(float64 a64, float64 b64, bool subtract, float_status *status)
 {
-    double a = *(double *)&a64;
-    double b = *(double *)&b64;
-
-    if (likely(isnormal(a) && isnormal(b) &&
+    if (likely((float64_is_normal(a64) || float64_is_zero(a64)) &&
+               (float64_is_normal(b64) || float64_is_zero(b64)) &&
                status->float_rounding_mode == float_round_nearest_even)) {
+        double a = *(double *)&a64;
+        double b = *(double *)&b64;
         double r;
+        float64 r64;
 
         if (subtract) {
             b = -b;
         }
         r = a + b;
-        if (isinf(r)) {
+        r64 = *(float64 *)&r;
+        if (float64_is_infinity(r64)) {
             status->float_exception_flags |= float_flag_overflow;
         }
         if (!(status->float_exception_flags & float_flag_inexact)) {
@@ -800,7 +804,7 @@ fpu_f64_addsub(float64 a64, float64 b64, bool subtract, float_status *status)
                 status->float_exception_flags |= float_flag_inexact;
             }
         }
-        return *(float64 *)&r;
+        return r64;
     } else {
         FloatParts pa = float64_unpack_canonical(a64, status);
         FloatParts pb = float64_unpack_canonical(b64, status);
@@ -911,15 +915,16 @@ soft_f32_mul(float32 a, float32 b, float_status *status)
 
 float32 float32_mul(float32 a32, float32 b32, float_status *status)
 {
-    float a = *(float *)&a32;
-    float b = *(float *)&b32;
-
-    if (likely(isnormal(a) && isnormal(b) &&
+    if (likely((float32_is_normal(a32) || float32_is_zero(a32)) &&
+               (float32_is_normal(b32) || float32_is_zero(b32)) &&
                status->float_exception_flags & float_flag_inexact &&
                status->float_rounding_mode == float_round_nearest_even)) {
+        float a = *(float *)&a32;
+        float b = *(float *)&b32;
         float r = a * b;
+        float32 r32 = *(float32 *)&r;
 
-        if (unlikely(isinf(r))) {
+        if (unlikely(float32_is_infinity(r32))) {
             status->float_exception_flags |= float_flag_overflow;
         } else if (unlikely(fabsf(r) <= FLT_MIN)) {
             return soft_f32_mul(a32, b32, status);
@@ -942,15 +947,16 @@ soft_f64_mul(float64 a, float64 b, float_status *status)
 
 float64 float64_mul(float64 a64, float64 b64, float_status *status)
 {
-    double a = *(double *)&a64;
-    double b = *(double *)&b64;
-
-    if (likely(isnormal(a) && isnormal(b) &&
+    if (likely((float64_is_normal(a64) || float64_is_zero(a64)) &&
+               (float64_is_normal(b64) || float64_is_zero(b64)) &&
                status->float_exception_flags & float_flag_inexact &&
                status->float_rounding_mode == float_round_nearest_even)) {
+        double a = *(double *)&a64;
+        double b = *(double *)&b64;
         double r = a * b;
+        float64 r64 = *(float64 *)&r;
 
-        if (unlikely(isinf(r))) {
+        if (unlikely(float64_is_infinity(r64))) {
             status->float_exception_flags |= float_flag_overflow;
         } else if (unlikely(fabs(r) <= DBL_MIN)) {
             return soft_f64_mul(a64, b64, status);
@@ -1951,17 +1957,14 @@ int float ## sz ## _compare_quiet(float ## sz a, float ## sz b,         \
 }
 
 COMPARE(16)
-COMPARE(64)
 
 #undef COMPARE
 
 static inline
 int fpu_float32_compare(float32 a, float32 b, bool is_quiet, float_status *s)
 {
-    float af = *(float *)&a;
-    float bf = *(float *)&b;
-
-    if (unlikely(isnan(af) || isnan(bf))) {
+    if (unlikely(float32_is_any_nan(a) ||
+                 float32_is_any_nan(b))) {
         FloatParts pa = float32_unpack_canonical(a, s);
         FloatParts pb = float32_unpack_canonical(b, s);
 
@@ -1971,14 +1974,19 @@ int fpu_float32_compare(float32 a, float32 b, bool is_quiet, float_status *s)
             s->float_exception_flags |= float_flag_invalid;
         }
         return float_relation_unordered;
+    } else {
+        float af = *(float *)&a;
+        float bf = *(float *)&b;
+
+        if (isgreater(af, bf)) {
+            return float_relation_greater;
+        }
+        if (isless(af, bf)) {
+            return float_relation_less;
+        }
+        return float_relation_equal;
     }
-    if (isgreater(af, bf)) {
-        return float_relation_greater;
-    }
-    if (isless(af, bf)) {
-        return float_relation_less;
-    }
-    return float_relation_equal;
+    g_assert_not_reached();
 }
 
 int __attribute__((flatten))
@@ -1991,6 +1999,47 @@ int __attribute__((flatten))
 float32_compare_quiet(float32 a, float32 b, float_status *s)
 {
     return fpu_float32_compare(a, b, true, s);
+}
+
+static inline
+int fpu_float64_compare(float64 a, float64 b, bool is_quiet, float_status *s)
+{
+    if (unlikely(float64_is_any_nan(a) ||
+                 float64_is_any_nan(b))) {
+        FloatParts pa = float64_unpack_canonical(a, s);
+        FloatParts pb = float64_unpack_canonical(b, s);
+
+        if (!is_quiet ||
+            pa.cls == float_class_snan ||
+            pb.cls == float_class_snan) {
+            s->float_exception_flags |= float_flag_invalid;
+        }
+        return float_relation_unordered;
+    } else {
+        double ad = *(double *)&a;
+        double bd = *(double *)&b;
+
+        if (isgreater(ad, bd)) {
+            return float_relation_greater;
+        }
+        if (isless(ad, bd)) {
+            return float_relation_less;
+        }
+        return float_relation_equal;
+    }
+    g_assert_not_reached();
+}
+
+int __attribute__((flatten))
+float64_compare(float64 a, float64 b, float_status *s)
+{
+    return fpu_float64_compare(a, b, false, s);
+}
+
+int __attribute__((flatten))
+float64_compare_quiet(float64 a, float64 b, float_status *s)
+{
+    return fpu_float64_compare(a, b, true, s);
 }
 
 /* Multiply A by 2 raised to the power N.  */
@@ -2109,11 +2158,11 @@ float16 __attribute__((flatten)) float16_sqrt(float16 a, float_status *status)
 
 float32 __attribute__((flatten)) float32_sqrt(float32 a, float_status *status)
 {
-    float f = *(float *)&a;
-
-    if (likely(isnormal(f) && !signbit(f) &&
+    if (likely((float32_is_normal(a) || float32_is_zero(a)) &&
+               !float32_is_neg(a) &&
                status->float_exception_flags & float_flag_inexact &&
                status->float_rounding_mode == float_round_nearest_even)) {
+        float f = *(float *)&a;
         float r = sqrtf(f);
 
         return *(float32 *)&r;
@@ -2126,11 +2175,11 @@ float32 __attribute__((flatten)) float32_sqrt(float32 a, float_status *status)
 
 float64 __attribute__((flatten)) float64_sqrt(float64 a, float_status *status)
 {
-    double d = *(double *)&a;
-
-    if (likely(isnormal(d) && !signbit(d) &&
+    if (likely((float64_is_normal(a) || float64_is_zero(a)) &&
+               !float64_is_neg(a) &&
                status->float_exception_flags & float_flag_inexact &&
                status->float_rounding_mode == float_round_nearest_even)) {
+        double d = *(double *)&a;
         double r = sqrt(d);
 
         return *(float64 *)&r;
