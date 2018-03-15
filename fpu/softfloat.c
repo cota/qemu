@@ -926,7 +926,7 @@ float32 float32_mul(float32 a32, float32 b32, float_status *status)
 
         if (unlikely(float32_is_infinity(r32))) {
             status->float_exception_flags |= float_flag_overflow;
-        } else if (unlikely(fabsf(r) <= FLT_MIN)) {
+        } else if (unlikely(!float32_is_zero(r32) && fabsf(r) <= FLT_MIN)) {
             return soft_f32_mul(a32, b32, status);
         }
         return *(float32 *)&r;
@@ -958,7 +958,7 @@ float64 float64_mul(float64 a64, float64 b64, float_status *status)
 
         if (unlikely(float64_is_infinity(r64))) {
             status->float_exception_flags |= float_flag_overflow;
-        } else if (unlikely(fabs(r) <= DBL_MIN)) {
+        } else if (unlikely(!float64_is_zero(r64) && fabs(r) <= DBL_MIN)) {
             return soft_f64_mul(a64, b64, status);
         }
         return *(float64 *)&r;
