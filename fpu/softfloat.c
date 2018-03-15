@@ -919,17 +919,23 @@ float32 float32_mul(float32 a32, float32 b32, float_status *status)
                (float32_is_normal(b32) || float32_is_zero(b32)) &&
                status->float_exception_flags & float_flag_inexact &&
                status->float_rounding_mode == float_round_nearest_even)) {
-        float a = *(float *)&a32;
-        float b = *(float *)&b32;
-        float r = a * b;
-        float32 r32 = *(float32 *)&r;
+        if (float32_is_zero(a32) || float32_is_zero(b32)) {
+            bool signbit = float32_is_neg(a32) ^ float32_is_neg(b32);
 
-        if (unlikely(float32_is_infinity(r32))) {
-            status->float_exception_flags |= float_flag_overflow;
-        } else if (unlikely(fabsf(r) <= FLT_MIN)) {
-            return soft_f32_mul(a32, b32, status);
+            return float32_set_sign(0, signbit);
+        } else {
+            float a = *(float *)&a32;
+            float b = *(float *)&b32;
+            float r = a * b;
+            float32 r32 = *(float32 *)&r;
+
+            if (unlikely(float32_is_infinity(r32))) {
+                status->float_exception_flags |= float_flag_overflow;
+            } else if (unlikely(fabsf(r) <= FLT_MIN)) {
+                return soft_f32_mul(a32, b32, status);
+            }
+            return *(float32 *)&r;
         }
-        return *(float32 *)&r;
     } else {
         return soft_f32_mul(a32, b32, status);
     }
@@ -951,17 +957,23 @@ float64 float64_mul(float64 a64, float64 b64, float_status *status)
                (float64_is_normal(b64) || float64_is_zero(b64)) &&
                status->float_exception_flags & float_flag_inexact &&
                status->float_rounding_mode == float_round_nearest_even)) {
-        double a = *(double *)&a64;
-        double b = *(double *)&b64;
-        double r = a * b;
-        float64 r64 = *(float64 *)&r;
+        if (float64_is_zero(a64) || float64_is_zero(b64)) {
+            bool signbit = float64_is_neg(a64) ^ float64_is_neg(b64);
 
-        if (unlikely(float64_is_infinity(r64))) {
-            status->float_exception_flags |= float_flag_overflow;
-        } else if (unlikely(fabs(r) <= DBL_MIN)) {
-            return soft_f64_mul(a64, b64, status);
+            return float64_set_sign(0, signbit);
+        } else {
+            double a = *(double *)&a64;
+            double b = *(double *)&b64;
+            double r = a * b;
+            float64 r64 = *(float64 *)&r;
+
+            if (unlikely(float64_is_infinity(r64))) {
+                status->float_exception_flags |= float_flag_overflow;
+            } else if (unlikely(fabs(r) <= DBL_MIN)) {
+                return soft_f64_mul(a64, b64, status);
+            }
+            return *(float64 *)&r;
         }
-        return *(float64 *)&r;
     } else {
         return soft_f64_mul(a64, b64, status);
     }
