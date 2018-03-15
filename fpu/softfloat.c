@@ -934,7 +934,7 @@ float32 float32_mul(float32 a32, float32 b32, float_status *status)
             } else if (unlikely(fabsf(r) <= FLT_MIN)) {
                 return soft_f32_mul(a32, b32, status);
             }
-            return *(float32 *)&r;
+            return r32;
         }
     } else {
         return soft_f32_mul(a32, b32, status);
@@ -972,7 +972,7 @@ float64 float64_mul(float64 a64, float64 b64, float_status *status)
             } else if (unlikely(fabs(r) <= DBL_MIN)) {
                 return soft_f64_mul(a64, b64, status);
             }
-            return *(float64 *)&r;
+            return r64;
         }
     } else {
         return soft_f64_mul(a64, b64, status);
