@@ -740,7 +740,7 @@ float16  __attribute__((flatten)) float16_add(float16 a, float16 b,
     return float16_round_pack_canonical(pr, status);
 }
 
-static inline float32
+static float32
 fpu_f32_addsub(float32 a32, float32 b32, bool subtract, float_status *status)
 {
     if (likely((float32_is_normal(a32) || float32_is_zero(a32)) &&
@@ -780,7 +780,7 @@ float32 __attribute__((flatten)) float32_add(float32 a, float32 b,
     return fpu_f32_addsub(a, b, false, status);
 }
 
-static inline float64
+static float64
 fpu_f64_addsub(float64 a64, float64 b64, bool subtract, float_status *status)
 {
     if (likely((float64_is_normal(a64) || float64_is_zero(a64)) &&
@@ -1972,8 +1972,8 @@ COMPARE(16)
 
 #undef COMPARE
 
-static inline
-int fpu_float32_compare(float32 a, float32 b, bool is_quiet, float_status *s)
+static int fpu_float32_compare(float32 a, float32 b, bool is_quiet,
+                               float_status *s)
 {
     if (unlikely(float32_is_any_nan(a) ||
                  float32_is_any_nan(b))) {
@@ -2013,8 +2013,8 @@ float32_compare_quiet(float32 a, float32 b, float_status *s)
     return fpu_float32_compare(a, b, true, s);
 }
 
-static inline
-int fpu_float64_compare(float64 a, float64 b, bool is_quiet, float_status *s)
+static int fpu_float64_compare(float64 a, float64 b, bool is_quiet,
+                               float_status *s)
 {
     if (unlikely(float64_is_any_nan(a) ||
                  float64_is_any_nan(b))) {
