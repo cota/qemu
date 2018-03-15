@@ -3349,7 +3349,7 @@ float128 uint64_to_float128(uint64_t a, float_status *status)
 | Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float32_to_float64(float32 a, float_status *status)
+static float64 soft_f32_to_f64(float32 a, float_status *status)
 {
     flag aSign;
     int aExp;
@@ -3372,6 +3372,20 @@ float64 float32_to_float64(float32 a, float_status *status)
     }
     return packFloat64( aSign, aExp + 0x380, ( (uint64_t) aSig )<<29 );
 
+}
+
+float64 float32_to_float64(float32 a, float_status *status)
+{
+    if (likely(float32_is_normal(a))) {
+        float f = *(float *)&a;
+        double r = f;
+
+        return *(float64 *)&r;
+    } else if (float32_is_zero(a)) {
+        return float64_set_sign(0, float32_is_neg(a));
+    } else {
+        return soft_f32_to_f64(a, status);
+    }
 }
 
 /*----------------------------------------------------------------------------
