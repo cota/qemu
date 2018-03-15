@@ -1286,7 +1286,7 @@ float16 float16_div(float16 a, float16 b, float_status *status)
     return float16_round_pack_canonical(pr, status);
 }
 
-float32 float32_div(float32 a, float32 b, float_status *status)
+static float32 soft_f32_div(float32 a, float32 b, float_status *status)
 {
     FloatParts pa = float32_unpack_canonical(a, status);
     FloatParts pb = float32_unpack_canonical(b, status);
@@ -1295,13 +1295,57 @@ float32 float32_div(float32 a, float32 b, float_status *status)
     return float32_round_pack_canonical(pr, status);
 }
 
-float64 float64_div(float64 a, float64 b, float_status *status)
+float32 float32_div(float32 a32, float32 b32, float_status *status)
+{
+    if (likely(float32_is_normal(a32) &&
+               float32_is_normal(b32) &&
+               status->float_exception_flags & float_flag_inexact &&
+               status->float_rounding_mode == float_round_nearest_even)) {
+        float a = *(float *)&a32;
+        float b = *(float *)&b32;
+        float r = a / b;
+        float32 r32 = *(float32 *)&r;
+
+        if (unlikely(float32_is_infinity(r32))) {
+            status->float_exception_flags |= float_flag_overflow;
+        } else if (unlikely(fabsf(r) <= FLT_MIN)) {
+            return soft_f32_div(a32, b32, status);
+        }
+        return r32;
+    } else {
+        return soft_f32_div(a32, b32, status);
+    }
+}
+
+static float64 soft_f64_div(float64 a, float64 b, float_status *status)
 {
     FloatParts pa = float64_unpack_canonical(a, status);
     FloatParts pb = float64_unpack_canonical(b, status);
     FloatParts pr = div_floats(pa, pb, status);
 
     return float64_round_pack_canonical(pr, status);
+}
+
+float64 float64_div(float64 a64, float64 b64, float_status *status)
+{
+    if (likely(float64_is_normal(a64) &&
+               float64_is_normal(b64) &&
+               status->float_exception_flags & float_flag_inexact &&
+               status->float_rounding_mode == float_round_nearest_even)) {
+        double a = *(double *)&a64;
+        double b = *(double *)&b64;
+        double r = a / b;
+        float64 r64 = *(float64 *)&r;
+
+        if (unlikely(float64_is_infinity(r64))) {
+            status->float_exception_flags |= float_flag_overflow;
+        } else if (unlikely(fabs(r) <= DBL_MIN)) {
+            return soft_f64_div(a64, b64, status);
+        }
+        return r64;
+    } else {
+        return soft_f64_div(a64, b64, status);
+    }
 }
 
 /*
