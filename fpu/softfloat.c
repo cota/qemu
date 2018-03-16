@@ -1216,24 +1216,39 @@ float32_muladd(float32 a32, float32 b32, float32 c32, int flags,
                !(flags & float_muladd_halve_result) &&
                status->float_exception_flags & float_flag_inexact &&
                status->float_rounding_mode == float_round_nearest_even)) {
-        float a, b, c, r;
-        float32 r32;
-        float32 aa32 = flags & float_muladd_negate_product ?
-            float32_chs(a32) : a32;
-        float32 cc32 = flags & float_muladd_negate_c ? float32_chs(c32) : c32;
+        if (float32_is_zero(a32) || float32_is_zero(b32)) {
+            float32 prod;
+            float32 r;
+            bool prod_sign;
 
-        a = *(float *)&aa32;
-        b = *(float *)&b32;
-        c = *(float *)&cc32;
-        r = fmaf(a, b, c);
-        r32 = *(float32 *)&r;
+            prod_sign = float32_is_neg(a32) ^ float32_is_neg(b32);
+            prod_sign ^= !!(flags & float_muladd_negate_product);
+            prod = float32_set_sign(0, prod_sign);
+            if (flags & float_muladd_negate_c) {
+                c32 = float32_chs(c32);
+            }
+            r = fpu_f32_addsub(prod, c32, false, status);
+            return flags & float_muladd_negate_result ? float32_chs(r) : r;
+        } else {
+            float a, b, c, r;
+            float32 r32;
+            float32 aa32 = flags & float_muladd_negate_product ?
+                float32_chs(a32) : a32;
+            float32 cc32 = flags & float_muladd_negate_c ? float32_chs(c32) : c32;
 
-        if (unlikely(float32_is_infinity(r32))) {
-            status->float_exception_flags |= float_flag_overflow;
-        } else if (unlikely(fabsf(r) <= FLT_MIN)) {
-            goto soft;
+            a = *(float *)&aa32;
+            b = *(float *)&b32;
+            c = *(float *)&cc32;
+            r = fmaf(a, b, c);
+            r32 = *(float32 *)&r;
+
+            if (unlikely(float32_is_infinity(r32))) {
+                status->float_exception_flags |= float_flag_overflow;
+            } else if (unlikely(fabsf(r) <= FLT_MIN)) {
+                goto soft;
+            }
+            return flags & float_muladd_negate_result ? float32_chs(r32) : r32;
         }
-        return flags & float_muladd_negate_result ? float32_chs(r32) : r32;
     }
  soft:
     return soft_f32_muladd(a32, b32, c32, flags, status);
@@ -1261,24 +1276,40 @@ float64_muladd(float64 a64, float64 b64, float64 c64, int flags,
                !(flags & float_muladd_halve_result) &&
                status->float_exception_flags & float_flag_inexact &&
                status->float_rounding_mode == float_round_nearest_even)) {
-        double a, b, c, r;
-        float64 r64;
-        float64 aa64 = flags & float_muladd_negate_product ?
-            float64_chs(a64) : a64;
-        float64 cc64 = flags & float_muladd_negate_c ? float64_chs(c64) : c64;
+        if (float64_is_zero(a64) || float64_is_zero(b64)) {
+            float64 prod;
+            float64 r;
+            bool prod_sign;
 
-        a = *(double *)&aa64;
-        b = *(double *)&b64;
-        c = *(double *)&cc64;
-        r = fma(a, b, c);
-        r64 = *(float64 *)&r;
+            prod_sign = float64_is_neg(a64) ^ float64_is_neg(b64);
+            prod_sign ^= !!(flags & float_muladd_negate_product);
+            prod = float64_set_sign(0, prod_sign);
+            if (flags & float_muladd_negate_c) {
+                c64 = float64_chs(c64);
+            }
+            r = fpu_f64_addsub(prod, c64, false, status);
+            return flags & float_muladd_negate_result ? float64_chs(r) : r;
+        } else {
+            double a, b, c, r;
+            float64 r64;
+            float64 aa64 = flags & float_muladd_negate_product ?
+                float64_chs(a64) : a64;
+            float64 cc64 = flags & float_muladd_negate_c ?
+                float64_chs(c64) : c64;
 
-        if (unlikely(float64_is_infinity(r64))) {
-            status->float_exception_flags |= float_flag_overflow;
-        } else if (unlikely(fabs(r) <= DBL_MIN)) {
-            goto soft;
+            a = *(double *)&aa64;
+            b = *(double *)&b64;
+            c = *(double *)&cc64;
+            r = fma(a, b, c);
+            r64 = *(float64 *)&r;
+
+            if (unlikely(float64_is_infinity(r64))) {
+                status->float_exception_flags |= float_flag_overflow;
+            } else if (unlikely(fabs(r) <= DBL_MIN)) {
+                goto soft;
+            }
+            return flags & float_muladd_negate_result ? float64_chs(r64) : r64;
         }
-        return flags & float_muladd_negate_result ? float64_chs(r64) : r64;
     }
  soft:
     return soft_f64_muladd(a64, b64, c64, flags, status);
