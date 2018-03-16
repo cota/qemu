@@ -47,6 +47,9 @@ enum op {
     OP_SUB,
     OP_MUL,
     OP_MULADD,
+    OP_MULADD_NEG_ADDEND,
+    OP_MULADD_NEG_PRODUCT,
+    OP_MULADD_NEG_RESULT,
     OP_DIV,
     OP_SQRT,
     OP_MINNUM,
@@ -63,6 +66,9 @@ static const struct op_desc ops[] = {
     [OP_SUB] =       { "-", 2 },
     [OP_MUL] =       { "*", 2 },
     [OP_MULADD] =    { "*+", 3 },
+    [OP_MULADD_NEG_ADDEND] =  { "*+nc", 3 },
+    [OP_MULADD_NEG_PRODUCT] = { "*+np", 3 },
+    [OP_MULADD_NEG_RESULT] =  { "*+nr", 3 },
     [OP_DIV] =       { "/", 2 },
     [OP_SQRT] =      { "V", 1 },
     [OP_MINNUM] =    { "<C", 2 },
@@ -387,6 +393,27 @@ static enum error soft_tester(const struct test_op *t)
             float32 c = t->operands[2];
 
             res = float32_muladd(a, b, c, 0, &status);
+            break;
+        }
+        case OP_MULADD_NEG_ADDEND:
+        {
+            float32 c = t->operands[2];
+
+            res = float32_muladd(a, b, c, float_muladd_negate_c, &status);
+            break;
+        }
+        case OP_MULADD_NEG_PRODUCT:
+        {
+            float32 c = t->operands[2];
+
+            res = float32_muladd(a, b, c, float_muladd_negate_product, &status);
+            break;
+        }
+        case OP_MULADD_NEG_RESULT:
+        {
+            float32 c = t->operands[2];
+
+            res = float32_muladd(a, b, c, float_muladd_negate_result, &status);
             break;
         }
         case OP_DIV:
