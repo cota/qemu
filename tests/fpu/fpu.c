@@ -748,7 +748,7 @@ static enum error ibm_test_line(const char *line)
             t.prec = PREC_FLOAT;
         } else if (strncmp("d64", p, 3) == 0) {
             t.prec = PREC_DOUBLE;
-        } else if (strncmp("d128", p, 3) == 0) {
+        } else if (strncmp("d128", p, 4) == 0) {
             return ERROR_NOT_HANDLED; /* XXX */
         } else {
             return ERROR_INPUT;
