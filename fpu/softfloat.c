@@ -1194,8 +1194,9 @@ float16 __attribute__((flatten)) float16_muladd(float16 a, float16 b, float16 c,
     return float16_round_pack_canonical(pr, status);
 }
 
-float32 __attribute__((flatten)) float32_muladd(float32 a, float32 b, float32 c,
-                                                int flags, float_status *status)
+static float32 __attribute__((flatten))
+soft_f32_muladd(float32 a, float32 b, float32 c, int flags,
+                float_status *status)
 {
     FloatParts pa = float32_unpack_canonical(a, status);
     FloatParts pb = float32_unpack_canonical(b, status);
@@ -1205,8 +1206,42 @@ float32 __attribute__((flatten)) float32_muladd(float32 a, float32 b, float32 c,
     return float32_round_pack_canonical(pr, status);
 }
 
-float64 __attribute__((flatten)) float64_muladd(float64 a, float64 b, float64 c,
-                                                int flags, float_status *status)
+float32
+float32_muladd(float32 a32, float32 b32, float32 c32, int flags,
+               float_status *status)
+{
+    if (likely((float32_is_normal(a32) || float32_is_zero(a32)) &&
+               (float32_is_normal(b32) || float32_is_zero(b32)) &&
+               (float32_is_normal(c32) || float32_is_zero(c32)) &&
+               !(flags & float_muladd_halve_result) &&
+               status->float_exception_flags & float_flag_inexact &&
+               status->float_rounding_mode == float_round_nearest_even)) {
+        float a, b, c, r;
+        float32 r32;
+        float32 aa32 = flags & float_muladd_negate_product ?
+            float32_chs(a32) : a32;
+        float32 cc32 = flags & float_muladd_negate_c ? float32_chs(c32) : c32;
+
+        a = *(float *)&aa32;
+        b = *(float *)&b32;
+        c = *(float *)&cc32;
+        r = fmaf(a, b, c);
+        r32 = *(float32 *)&r;
+
+        if (unlikely(float32_is_infinity(r32))) {
+            status->float_exception_flags |= float_flag_overflow;
+        } else if (unlikely(fabsf(r) <= FLT_MIN)) {
+            goto soft;
+        }
+        return flags & float_muladd_negate_result ? float32_chs(r32) : r32;
+    }
+ soft:
+    return soft_f32_muladd(a32, b32, c32, flags, status);
+}
+
+static float64 __attribute__((flatten))
+soft_f64_muladd(float64 a, float64 b, float64 c, int flags,
+                float_status *status)
 {
     FloatParts pa = float64_unpack_canonical(a, status);
     FloatParts pb = float64_unpack_canonical(b, status);
@@ -1214,6 +1249,39 @@ float64 __attribute__((flatten)) float64_muladd(float64 a, float64 b, float64 c,
     FloatParts pr = muladd_floats(pa, pb, pc, flags, status);
 
     return float64_round_pack_canonical(pr, status);
+}
+
+float64
+float64_muladd(float64 a64, float64 b64, float64 c64, int flags,
+               float_status *status)
+{
+    if (likely((float64_is_normal(a64) || float64_is_zero(a64)) &&
+               (float64_is_normal(b64) || float64_is_zero(b64)) &&
+               (float64_is_normal(c64) || float64_is_zero(c64)) &&
+               !(flags & float_muladd_halve_result) &&
+               status->float_exception_flags & float_flag_inexact &&
+               status->float_rounding_mode == float_round_nearest_even)) {
+        double a, b, c, r;
+        float64 r64;
+        float64 aa64 = flags & float_muladd_negate_product ?
+            float64_chs(a64) : a64;
+        float64 cc64 = flags & float_muladd_negate_c ? float64_chs(c64) : c64;
+
+        a = *(double *)&aa64;
+        b = *(double *)&b64;
+        c = *(double *)&cc64;
+        r = fma(a, b, c);
+        r64 = *(float64 *)&r;
+
+        if (unlikely(float64_is_infinity(r64))) {
+            status->float_exception_flags |= float_flag_overflow;
+        } else if (unlikely(fabs(r) <= DBL_MIN)) {
+            goto soft;
+        }
+        return flags & float_muladd_negate_result ? float64_chs(r64) : r64;
+    }
+ soft:
+    return soft_f64_muladd(a64, b64, c64, flags, status);
 }
 
 /*
