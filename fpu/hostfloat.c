@@ -50,3 +50,52 @@ GEN_TYPE_CONV(float64_to_double, double, float64)
 GEN_TYPE_CONV(float_to_float32, float32, float)
 GEN_TYPE_CONV(double_to_float64, float64, double)
 #undef GEN_TYPE_CONV
+
+#define GEN_FPU_ADDSUB(add_name, sub_name, soft_t, host_t)              \
+    static soft_t fpu_ ## soft_t ## _addsub(soft_t a, soft_t b,         \
+                                            bool subtract,              \
+                                            float_status *s)            \
+    {                                                                   \
+        if (likely((soft_t ## _is_normal(a) || soft_t ## _is_zero(a)) && \
+                   (soft_t ## _is_normal(b) || soft_t ## _is_zero(b)) && \
+                   s->float_rounding_mode == float_round_nearest_even)) { \
+            host_t ha = soft_t ## _to_ ## host_t(a);                    \
+            host_t hb = soft_t ## _to_ ## host_t(b);                    \
+            host_t hr;                                                  \
+            soft_t r;                                                   \
+                                                                        \
+            if (subtract) {                                             \
+                hb = -hb;                                               \
+            }                                                           \
+            hr = ha + hb;                                               \
+            r = host_t ## _to_ ## soft_t(hr);                           \
+            if (soft_t ## _is_infinity(r)) {                            \
+                s->float_exception_flags |= float_flag_overflow;        \
+            }                                                           \
+            if (unlikely(!(s->float_exception_flags &                   \
+                           float_flag_inexact)) &&                      \
+                (hr - ha != hb || hr - hb != ha)) {                     \
+                s->float_exception_flags |= float_flag_inexact;         \
+            }                                                           \
+            return r;                                                   \
+        }                                                               \
+        if (subtract) {                                                 \
+            return soft_ ## soft_t ## _sub(a, b, s);                    \
+        } else {                                                        \
+            return soft_ ## soft_t ## _add(a, b, s);                    \
+        }                                                               \
+    }                                                                   \
+                                                                        \
+    soft_t add_name(soft_t a, soft_t b, float_status *status)           \
+    {                                                                   \
+        return fpu_ ## soft_t ## _addsub(a, b, false, status);          \
+    }                                                                   \
+                                                                        \
+    soft_t sub_name(soft_t a, soft_t b, float_status *status)           \
+    {                                                                   \
+        return fpu_ ## soft_t ## _addsub(a, b, true, status);           \
+    }                                                                   \
+
+GEN_FPU_ADDSUB(float32_add, float32_sub, float32, float)
+GEN_FPU_ADDSUB(float64_add, float64_sub, float64, double)
+#undef GEN_FPU_ADDSUB
