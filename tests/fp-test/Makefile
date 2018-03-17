@@ -26,7 +26,7 @@ ibm:
 whitelist.txt:
 	wget -nv -O $@ http://www.cs.columbia.edu/~cota/qemu/fpbench-whitelist.txt
 
-fp-test$(EXESUF): fp-test.o softfloat.o
+fp-test$(EXESUF): fp-test.o softfloat.o hostfloat.o
 
 clean:
 	rm -f *.o *.d $(OBJS)
