@@ -994,8 +994,8 @@ float16 __attribute__((flatten)) float16_mul(float16 a, float16 b,
     return float16_round_pack_canonical(pr, status);
 }
 
-float32 __attribute__((flatten)) float32_mul(float32 a, float32 b,
-                                             float_status *status)
+static float32 __attribute__((flatten,noinline))
+soft_float32_mul(float32 a, float32 b, float_status *status)
 {
     FloatParts pa = float32_unpack_canonical(a, status);
     FloatParts pb = float32_unpack_canonical(b, status);
@@ -1004,8 +1004,8 @@ float32 __attribute__((flatten)) float32_mul(float32 a, float32 b,
     return float32_round_pack_canonical(pr, status);
 }
 
-float64 __attribute__((flatten)) float64_mul(float64 a, float64 b,
-                                             float_status *status)
+static float64 __attribute__((flatten,noinline))
+soft_float64_mul(float64 a, float64 b, float_status *status)
 {
     FloatParts pa = float64_unpack_canonical(a, status);
     FloatParts pb = float64_unpack_canonical(b, status);
@@ -1013,6 +1013,36 @@ float64 __attribute__((flatten)) float64_mul(float64 a, float64 b,
 
     return float64_round_pack_canonical(pr, status);
 }
+
+#define GEN_FPU_MUL(name, soft_t, host_t, host_abs_func, min_normal)    \
+    soft_t name(soft_t a, soft_t b, float_status *s)                    \
+    {                                                                   \
+        soft_t ## _input_flush2(&a, &b, s);                             \
+        if (likely((soft_t ## _is_normal(a) || soft_t ## _is_zero(a)) && \
+                   (soft_t ## _is_normal(b) || soft_t ## _is_zero(b)) && \
+                   s->float_exception_flags & float_flag_inexact &&     \
+                   s->float_rounding_mode == float_round_nearest_even)) { \
+            host_t ha = soft_t ## _to_ ## host_t(a);                    \
+            host_t hb = soft_t ## _to_ ## host_t(b);                    \
+            host_t hr = ha * hb;                                        \
+            soft_t r = host_t ## _to_ ## soft_t(hr);                    \
+                                                                        \
+            if (unlikely(soft_t ## _is_infinity(r))) {                  \
+                s->float_exception_flags |= float_flag_overflow;        \
+            } else if (unlikely(host_abs_func(hr) <= min_normal) &&     \
+                       !(soft_t ## _is_zero(a) ||                       \
+                         soft_t ## _is_zero(b))) {                      \
+                goto soft;                                              \
+            }                                                           \
+            return r;                                                   \
+        }                                                               \
+    soft:                                                               \
+        return soft_ ## soft_t ## _mul(a, b, s);                        \
+    }
+
+GEN_FPU_MUL(float32_mul, float32, float, fabsf, FLT_MIN)
+GEN_FPU_MUL(float64_mul, float64, double, fabs, DBL_MIN)
+#undef GEN_FPU_MUL
 
 /*
  * Returns the result of multiplying the floating-point values `a' and
