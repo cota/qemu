@@ -219,6 +219,7 @@ GEN_FPU_DIV(float64_div, float64, double, fabs, DBL_MIN)
 #define GEN_FPU_FMA(name, soft_t, host_t, host_fma_f, host_abs_f, min_normal) \
     soft_t name(soft_t a, soft_t b, soft_t c, int flags, float_status *s) \
     {                                                                   \
+        soft_t ## _input_flush3(&a, &b, &c, s);                         \
         if (likely((soft_t ## _is_normal(a) || soft_t ## _is_zero(a)) && \
                    (soft_t ## _is_normal(b) || soft_t ## _is_zero(b)) && \
                    (soft_t ## _is_normal(c) || soft_t ## _is_zero(c)) && \
