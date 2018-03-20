@@ -101,6 +101,7 @@ GEN_INPUT_FLUSH(float64)
                                             bool subtract,              \
                                             float_status *s)            \
     {                                                                   \
+        soft_t ## _input_flush2(&a, &b, s);                             \
         if (likely((soft_t ## _is_normal(a) || soft_t ## _is_zero(a)) && \
                    (soft_t ## _is_normal(b) || soft_t ## _is_zero(b)) && \
                    s->float_rounding_mode == float_round_nearest_even)) { \
@@ -135,12 +136,12 @@ GEN_INPUT_FLUSH(float64)
         }                                                               \
     }                                                                   \
                                                                         \
-    soft_t add_name(soft_t a, soft_t b, float_status *status)           \
+    soft_t __attribute__((flatten)) add_name(soft_t a, soft_t b, float_status *status)           \
     {                                                                   \
         return fpu_ ## soft_t ## _addsub(a, b, false, status);          \
     }                                                                   \
                                                                         \
-    soft_t sub_name(soft_t a, soft_t b, float_status *status)           \
+    soft_t __attribute__((flatten)) sub_name(soft_t a, soft_t b, float_status *status)           \
     {                                                                   \
         return fpu_ ## soft_t ## _addsub(a, b, true, status);           \
     }                                                                   \
