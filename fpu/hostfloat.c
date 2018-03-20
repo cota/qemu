@@ -187,6 +187,7 @@ GEN_FPU_MUL(float64_mul, float64, double, fabs, DBL_MIN)
 #define GEN_FPU_DIV(name, soft_t, host_t, host_abs_func, min_normal)    \
     soft_t name(soft_t a, soft_t b, float_status *s)                    \
     {                                                                   \
+        soft_t ## _input_flush2(&a, &b, s);                             \
         if (likely(soft_t ## _is_normal(a) &&                           \
                    soft_t ## _is_normal(b) &&                           \
                    s->float_exception_flags & float_flag_inexact &&     \
