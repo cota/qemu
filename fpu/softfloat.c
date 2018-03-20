@@ -263,6 +263,11 @@ static const FloatFmt float16_params = {
     FLOAT_PARAMS(5, 10)
 };
 
+static const FloatFmt float16_aef_params = {
+    FLOAT_PARAMS(5, 10)
+
+};
+
 static const FloatFmt float32_params = {
     FLOAT_PARAMS(8, 23)
 };
@@ -1203,6 +1208,9 @@ float64 float64_div(float64 a, float64 b, float_status *status)
  *
  * The float_to_float helper only needs to take care of raising
  * invalid exceptions or propagating the default NaN.
+ *
+ * For float16 source and destinations we need to handle potential ARM
+ * alternative format FP16.
  */
 
 static FloatParts float_to_float(FloatParts a, bool ieee, float_status *s)
