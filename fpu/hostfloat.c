@@ -153,6 +153,7 @@ GEN_FPU_ADDSUB(float64_add, float64_sub, float64, double)
 #define GEN_FPU_MUL(name, soft_t, host_t, host_abs_func, min_normal)    \
     soft_t name(soft_t a, soft_t b, float_status *s)                    \
     {                                                                   \
+        soft_t ## _input_flush2(&a, &b, s);                             \
         if (likely((soft_t ## _is_normal(a) || soft_t ## _is_zero(a)) && \
                    (soft_t ## _is_normal(b) || soft_t ## _is_zero(b)) && \
                    s->float_exception_flags & float_flag_inexact &&     \
