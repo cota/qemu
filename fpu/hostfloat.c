@@ -279,6 +279,7 @@ GEN_FPU_FMA(float64_muladd, float64, double, fma, fabs, DBL_MIN)
 #define GEN_FPU_SQRT(name, soft_t, host_t, host_sqrt_func)              \
     soft_t name(soft_t a, float_status *s)                              \
     {                                                                   \
+        soft_t ## _input_flush1(&a, s);                                 \
         if (likely((soft_t ## _is_normal(a) || soft_t ## _is_zero(a)) && \
                    !soft_t ## _is_neg(a) &&                             \
                    s->float_exception_flags & float_flag_inexact &&     \
