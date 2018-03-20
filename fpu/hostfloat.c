@@ -51,6 +51,51 @@ GEN_TYPE_CONV(float_to_float32, float32, float)
 GEN_TYPE_CONV(double_to_float64, float64, double)
 #undef GEN_TYPE_CONV
 
+#define GEN_INPUT_FLUSH(soft_t)                                         \
+    static inline void                                                  \
+    soft_t ## _input_flush__nocheck(soft_t *a, float_status *s)         \
+    {                                                                   \
+        if (unlikely(soft_t ## _is_denormal(*a))) {                     \
+            *a = float64_set_sign(0, soft_t ## _is_neg(*a));            \
+            s->float_exception_flags |= float_flag_input_denormal;      \
+        }                                                               \
+    }                                                                   \
+                                                                        \
+    static inline void                                                  \
+    soft_t ## _input_flush1(soft_t *a, float_status *s)                 \
+    {                                                                   \
+        if (unlikely(!s->flush_inputs_to_zero)) {                       \
+            return;                                                     \
+        }                                                               \
+        soft_t ## _input_flush__nocheck(a, s);                          \
+    }                                                                   \
+                                                                        \
+    static inline void                                                  \
+    soft_t ## _input_flush2(soft_t *a, soft_t *b, float_status *s)      \
+    {                                                                   \
+        if (likely(!s->flush_inputs_to_zero)) {                         \
+            return;                                                     \
+        }                                                               \
+        soft_t ## _input_flush__nocheck(a, s);                          \
+        soft_t ## _input_flush__nocheck(b, s);                          \
+    }                                                                   \
+                                                                        \
+    static inline void                                                  \
+    soft_t ## _input_flush3(soft_t *a, soft_t *b, soft_t *c,            \
+                            float_status *s)                            \
+    {                                                                   \
+        if (likely(!s->flush_inputs_to_zero)) {                         \
+            return;                                                     \
+        }                                                               \
+        soft_t ## _input_flush__nocheck(a, s);                          \
+        soft_t ## _input_flush__nocheck(b, s);                          \
+        soft_t ## _input_flush__nocheck(c, s);                          \
+    }
+
+GEN_INPUT_FLUSH(float32)
+GEN_INPUT_FLUSH(float64)
+#undef GEN_INPUT_FLUSH
+
 #define GEN_FPU_ADDSUB(add_name, sub_name, soft_t, host_t)              \
     static soft_t fpu_ ## soft_t ## _addsub(soft_t a, soft_t b,         \
                                             bool subtract,              \
