@@ -69,8 +69,12 @@ GEN_TYPE_CONV(double_to_float64, float64, double)
             }                                                           \
             hr = ha + hb;                                               \
             r = host_t ## _to_ ## soft_t(hr);                           \
-            if (soft_t ## _is_infinity(r)) {                            \
+            if (unlikely(soft_t ## _is_infinity(r))) {                  \
                 s->float_exception_flags |= float_flag_overflow;        \
+            } else if (unlikely(s->flush_to_zero &&                     \
+                                soft_t ## _is_denormal(r))) {           \
+                s->float_exception_flags |= float_flag_input_denormal;  \
+                return soft_t ## _set_sign(0, soft_t ## _is_neg(r));    \
             }                                                           \
             if (unlikely(!(s->float_exception_flags &                   \
                            float_flag_inexact)) &&                      \
