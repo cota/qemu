@@ -300,6 +300,7 @@ GEN_FPU_SQRT(float64_sqrt, float64, double, sqrt)
     static int fpu_ ## name(soft_t a, soft_t b, bool is_quiet,          \
                             float_status *s)                            \
     {                                                                   \
+        soft_t ## _input_flush2(&a, &b, s);                             \
         if (unlikely(soft_t ## _is_any_nan(a) ||                        \
                      soft_t ## _is_any_nan(b))) {                       \
             return soft_ ## name(a, b, is_quiet, s);                    \
