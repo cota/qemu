@@ -24,6 +24,9 @@
 VPATH = $(SRC_PATH)/tests/tcg/multiarch
 TEST_SRCS = $(wildcard $(SRC_PATH)/tests/tcg/multiarch/*.c)
 
+VPATH     += $(SRC_PATH)/tests/fp
+TEST_SRCS += $(wildcard $(SRC_PATH)/tests/fp/*.c)
+
 VPATH     += $(SRC_PATH)/tests/tcg/$(ARCH)
 TEST_SRCS += $(wildcard $(SRC_PATH)/tests/tcg/$(ARCH)/*.c)
 
@@ -44,6 +47,8 @@ CHECK_INCLUDE=$(wildcard $(EXTRA_MAKEFILE))
 ifeq ($(EXTRA_MAKEFILE),$(CHECK_INCLUDE))
 include $(EXTRA_MAKEFILE)
 endif
+
+fp-test: LDFLAGS+=-lm
 
 testthread: LDFLAGS=-lpthread
 

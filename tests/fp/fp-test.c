@@ -6,12 +6,72 @@
  * License: GNU GPL, version 2 or later.
  *   See the COPYING file in the top-level directory.
  */
-#ifndef HW_POISON_H
-#error Must define HW_POISON_H to work around TARGET_* poisoning
-#endif
+
+/* If HW_POISON_H isn't defined then we aren't building against qemu's
+ * softfloat */
+#ifdef HW_POISON_H
 
 #include "qemu/osdep.h"
 #include "fpu/softfloat.h"
+#define USE_SOFTFLOAT 1
+
+#else /* else define what QEMU would have given us */
+
+#define _GNU_SOURCE
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <stdbool.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <assert.h>
+#include <errno.h>
+
+#include <search.h>
+
+/* See include/fpu/softfloat-types.h */
+enum {
+    float_tininess_after_rounding  = 0,
+    float_tininess_before_rounding = 1
+};
+
+enum {
+    float_round_nearest_even = 0,
+    float_round_down         = 1,
+    float_round_up           = 2,
+    float_round_to_zero      = 3,
+    float_round_ties_away    = 4,
+    float_round_to_odd       = 5,
+};
+
+enum {
+    float_flag_invalid   =  1,
+    float_flag_divbyzero =  4,
+    float_flag_overflow  =  8,
+    float_flag_underflow = 16,
+    float_flag_inexact   = 32,
+    float_flag_input_denormal = 64,
+    float_flag_output_denormal = 128
+};
+
+/* See include/compiler.h */
+#ifndef likely
+#if __GNUC__ < 3
+#define __builtin_expect(x, n) (x)
+#endif
+
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x)   __builtin_expect(!!(x), 0)
+#endif
+
+#endif
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
 
 #include <fenv.h>
 #include <math.h>
@@ -116,16 +176,18 @@ struct tester {
 struct whitelist {
     char **lines;
     size_t n;
-    GHashTable *ht;
+    struct hsearch_data ht;
 };
 
 static uint64_t test_stats[ERROR_MAX];
 static struct whitelist whitelist;
 static uint8_t default_exceptions;
 static bool die_on_error = true;
+#ifdef USE_SOFTFLOAT
 static struct float_status soft_status = {
     .float_detect_tininess = float_tininess_before_rounding,
 };
+#endif
 
 static inline float u64_to_float(uint64_t v)
 {
@@ -285,7 +347,7 @@ static enum error host_tester(struct test_op *t)
         float res;
         int i;
 
-        g_assert(ops[t->op].n_operands <= ARRAY_SIZE(in));
+        assert(ops[t->op].n_operands <= ARRAY_SIZE(in));
         for (i = 0; i < ops[t->op].n_operands; i++) {
             /* use the host's QNaN/SNaN patterns */
             if (t->operands[i].type == OP_TYPE_QNAN) {
@@ -343,7 +405,7 @@ static enum error host_tester(struct test_op *t)
         double res;
         int i;
 
-        g_assert(ops[t->op].n_operands <= ARRAY_SIZE(in));
+        assert(ops[t->op].n_operands <= ARRAY_SIZE(in));
         for (i = 0; i < ops[t->op].n_operands; i++) {
             /* use the host's QNaN/SNaN patterns */
             if (t->operands[i].type == OP_TYPE_QNAN) {
@@ -429,6 +491,8 @@ static enum error host_tester(struct test_op *t)
     return tester_check(t, res64, result_is_nan, flags);
 }
 
+#ifdef USE_SOFTFLOAT
+
 static enum error soft_tester(struct test_op *t)
 {
     float_status *s = &soft_status;
@@ -445,7 +509,7 @@ static enum error soft_tester(struct test_op *t)
         float32 res;
         int i;
 
-        g_assert(ops[t->op].n_operands <= ARRAY_SIZE(in));
+        assert(ops[t->op].n_operands <= ARRAY_SIZE(in));
         for (i = 0; i < ops[t->op].n_operands; i++) {
             *in[i] = t->operands[i].val;
         }
@@ -504,7 +568,7 @@ static enum error soft_tester(struct test_op *t)
         float64 *in[] = { &a, &b, &c };
         int i;
 
-        g_assert(ops[t->op].n_operands <= ARRAY_SIZE(in));
+        assert(ops[t->op].n_operands <= ARRAY_SIZE(in));
         for (i = 0; i < ops[t->op].n_operands; i++) {
             *in[i] = t->operands[i].val;
         }
@@ -585,6 +649,14 @@ static const struct tester valid_testers[] = {
         .func = host_tester,
     },
 };
+#else
+static const struct tester valid_testers[] = {
+    [0] = {
+        .name = "host",
+        .func = host_tester,
+    },
+};
+#endif
 static const struct tester *tester = &valid_testers[0];
 
 static int ibm_get_exceptions(const char *p, uint8_t *excp)
@@ -622,7 +694,7 @@ static uint64_t fp_choose(enum precision prec, uint64_t f, uint64_t d)
     case PREC_DOUBLE:
         return d;
     default:
-        g_assert_not_reached();
+        assert(false);
     }
 }
 
@@ -756,7 +828,7 @@ ibm_fp_hex(const char *p, enum precision prec, struct operand *ret)
         } else if (prec == PREC_DOUBLE) {
             ret->val = double_to_u64(0.0);
         } else {
-            g_assert_not_reached();
+            assert(false);
         }
         return 0;
     } else if (!strcmp(p, "0x1")) {
@@ -765,7 +837,7 @@ ibm_fp_hex(const char *p, enum precision prec, struct operand *ret)
         } else if (prec == PREC_DOUBLE) {
             ret->val = double_to_u64(1.0);
         } else {
-            g_assert_not_reached();
+            assert(false);
         }
         return 0;
     }
@@ -915,10 +987,13 @@ static const struct input *input_type = &valid_input_types[INPUT_FMT_IBM];
 
 static bool line_is_whitelisted(const char *line)
 {
-    if (whitelist.ht == NULL) {
+    ENTRY e, *ep;
+
+    if (whitelist.ht.size == 0) {
         return false;
     }
-    return !!g_hash_table_lookup(whitelist.ht, line);
+    e.key = line;
+    return hsearch_r(e, FIND, &ep, &whitelist.ht);
 }
 
 static void test_file(const char *filename)
@@ -958,7 +1033,7 @@ static void test_file(const char *filename)
                         filename, i);
                 break;
             default:
-                g_assert_not_reached();
+                assert(false);
             }
             fprintf(stderr, "%s", line);
             if (die_on_error) {
@@ -1007,23 +1082,32 @@ static void set_tester(const char *optarg)
 
 static void whitelist_add_line(const char *orig_line)
 {
-    char *line;
+    char *line = strdup(orig_line);
     bool inserted;
+    ENTRY e, *ep;
+    int r;
 
-    if (whitelist.ht == NULL) {
-        whitelist.ht = g_hash_table_new(g_str_hash, g_str_equal);
+    if (whitelist.ht.size == 0) {
+        if (!hcreate_r(4096, &whitelist.ht)) {
+            fprintf(stderr, "%s: error creating hash table\n", __func__);
+        }
     }
-    line = g_hash_table_lookup(whitelist.ht, orig_line);
-    if (unlikely(line != NULL)) {
+
+    int hsearch_r(ENTRY item, ACTION action, ENTRY **retval,
+              struct hsearch_data *htab);
+
+    e.key = line;
+    r = hsearch_r(e, FIND, &ep, &whitelist.ht);
+    if (unlikely(r)) {
+        free(line);
         return;
     }
     whitelist.n++;
-    whitelist.lines = g_realloc_n(whitelist.lines, whitelist.n, sizeof(line));
-    line = strdup(orig_line);
+    whitelist.lines = realloc(whitelist.lines, (whitelist.n * sizeof(line)));
     whitelist.lines[whitelist.n - 1] = line;
-    /* if we pass key == val GLib will not reserve space for the value */
-    inserted = g_hash_table_insert(whitelist.ht, line, line);
-    g_assert(inserted);
+    e.data = line;
+    inserted = hsearch_r(e, ENTER, &ep, &whitelist.ht);
+    assert(inserted);
 }
 
 static void set_whitelist(const char *filename)
@@ -1061,18 +1145,20 @@ static void usage_complete(int argc, char *argv[])
 {
     fprintf(stderr, "Usage: %s [options] file1 [file2 ...]\n", argv[0]);
     fprintf(stderr, "options:\n");
-    fprintf(stderr, "  -a = Perform tininess detection after rounding "
-            "(soft tester only). Default: before\n");
     fprintf(stderr, "  -n = do not die on error. Default: dies on error\n");
     fprintf(stderr, "  -e = default exception flags (xiozu). Default: none\n");
     fprintf(stderr, "  -f = format of the input file(s). Default: %s\n",
             valid_input_types[0].name);
     fprintf(stderr, "  -t = tester. Default: %s\n", valid_testers[0].name);
     fprintf(stderr, "  -w = path to file with test cases to be whitelisted\n");
+#ifdef USE_SOFTFLOAT
+    fprintf(stderr, "  -a = Perform tininess detection after rounding "
+            "(soft tester only). Default: before\n");
     fprintf(stderr, "  -z = flush inputs to zero (soft tester only). "
             "Default: disabled\n");
     fprintf(stderr, "  -Z = flush output to zero (soft tester only). "
             "Default: disabled\n");
+#endif
 }
 
 static void parse_opts(int argc, char *argv[])
@@ -1085,9 +1171,6 @@ static void parse_opts(int argc, char *argv[])
             return;
         }
         switch (c) {
-        case 'a':
-            soft_status.float_detect_tininess = float_tininess_after_rounding;
-            break;
         case 'e':
             set_default_exceptions(optarg);
             break;
@@ -1106,15 +1189,20 @@ static void parse_opts(int argc, char *argv[])
         case 'w':
             set_whitelist(optarg);
             break;
+#ifdef USE_SOFTFLOAT
+        case 'a':
+            soft_status.float_detect_tininess = float_tininess_after_rounding;
+            break;
         case 'z':
             soft_status.flush_inputs_to_zero = 1;
             break;
         case 'Z':
             soft_status.flush_to_zero = 1;
             break;
+#endif
         }
     }
-    g_assert_not_reached();
+    assert(false);
 }
 
 static uint64_t count_errors(void)
