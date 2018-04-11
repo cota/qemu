@@ -34,7 +34,7 @@ SRCS=$(notdir ${TEST_SRCS})
 TESTS=$(SRCS:.c=)
 
 # We use what ever CC we have
-CFLAGS=-Wall -O0 -g -fno-strict-aliasing -static
+CFLAGS=-Wall -O0 -g -fno-strict-aliasing -static -D_GNU_SOURCE
 QEMU_CFLAGS=
 LDFLAGS=
 
