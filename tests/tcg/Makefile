@@ -25,13 +25,13 @@ VPATH = $(SRC_PATH)/tests/tcg/multiarch
 TEST_SRCS = $(wildcard $(SRC_PATH)/tests/tcg/multiarch/*.c)
 
 VPATH     += $(SRC_PATH)/tests/fp
-TEST_SRCS += $(wildcard $(SRC_PATH)/tests/fp/*.c)
+VPATH     += $(SRC_PATH)/fpu
 
 VPATH     += $(SRC_PATH)/tests/tcg/$(ARCH)
 TEST_SRCS += $(wildcard $(SRC_PATH)/tests/tcg/$(ARCH)/*.c)
 
 SRCS=$(notdir ${TEST_SRCS})
-TESTS=$(SRCS:.c=)
+TESTS=$(SRCS:.c=) fp-test
 
 # We use what ever CC we have
 CFLAGS=-Wall -O0 -g -fno-strict-aliasing -static -D_GNU_SOURCE
@@ -48,12 +48,21 @@ ifeq ($(EXTRA_MAKEFILE),$(CHECK_INCLUDE))
 include $(EXTRA_MAKEFILE)
 endif
 
-fp-test: LDFLAGS+=-lm
-
 testthread: LDFLAGS=-lpthread
 
 %: %.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+FP_CFLAGS := $(CFLAGS)
+FP_CFLAGS += $(QEMU_INCLUDES)
+FP_CFLAGS += -iquote ../..
+FP_CFLAGS += -DHW_POISON_H
+
+fp-test.o softfloat.o: %.o: %.c
+	$(CC) $(FP_CFLAGS) -c $< -o $@
+
+fp-test: fp-test.o softfloat.o
+	$(CC) $^ -o $@ -lm
 
 all: $(TESTS)
 
