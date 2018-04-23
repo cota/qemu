@@ -141,6 +141,8 @@ struct qemu_plugin_tb {
     struct qemu_plugin_dyn_cb_arr cbs[PLUGIN_N_CB_SUBTYPES];
 };
 
+extern bool use_plugin_clock;
+
 static inline
 void qemu_plugin_dyn_cb_arr_init(struct qemu_plugin_dyn_cb_arr *arr)
 {
@@ -200,6 +202,7 @@ void qemu_plugin_flush_cb(void);
 void qemu_plugin_atexit_cb(void);
 
 void qemu_plugin_add_dyn_cb_arr(struct qemu_plugin_dyn_cb_arr *arr);
+int64_t plugin_get_clock(void);
 
 void qemu_plugin_disable_mem_helpers(CPUState *cpu);
 
@@ -247,6 +250,8 @@ void qemu_plugin_add_dyn_cb_arr(struct qemu_plugin_dyn_cb_arr *arr)
 
 static inline void qemu_plugin_disable_mem_helpers(CPUState *cpu)
 { }
+
+int64_t plugin_get_clock(void);
 
 #endif /* !CONFIG_PLUGIN */
 
