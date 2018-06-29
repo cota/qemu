@@ -7214,14 +7214,15 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     DisasContext ctx_obj;
     DisasContext *ctx = &ctx_obj;
     DisasContextBase *dcbase = &ctx_obj.base;
+    DisasContextBase *db = &ctx_obj.base;
     opc_handler_t **table, *handler;
     int max_insns;
 
-    ctx->base.singlestep_enabled = cpu->singlestep_enabled;
-    ctx->base.tb = tb;
-    ctx->base.pc_first = tb->pc;
-    ctx->base.pc_next = tb->pc; /* nip */
-    ctx->base.num_insns = 0;
+    db->singlestep_enabled = cpu->singlestep_enabled;
+    db->tb = tb;
+    db->pc_first = tb->pc;
+    db->pc_next = tb->pc; /* nip */
+    db->num_insns = 0;
 
     ctx->exception = POWERPC_EXCP_NONE;
     ctx->spr_cb = env->spr_cb;
@@ -7274,14 +7275,14 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
         ctx->singlestep_enabled = 0;
     if ((env->flags & POWERPC_FLAG_BE) && msr_be)
         ctx->singlestep_enabled |= CPU_BRANCH_STEP;
-    if (unlikely(ctx->base.singlestep_enabled)) {
+    if (unlikely(db->singlestep_enabled)) {
         ctx->singlestep_enabled |= GDBSTUB_SINGLE_STEP;
     }
 #if defined (DO_SINGLE_STEP) && 0
     /* Single step trace mode */
     msr_se = 1;
 #endif
-    ctx->base.num_insns = 0;
+    db->num_insns = 0;
     max_insns = tb_cflags(tb) & CF_COUNT_MASK;
     if (max_insns == 0) {
         max_insns = CF_COUNT_MASK;
@@ -7295,34 +7296,34 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     /* Set env in case of segfault during code fetch */
     while (ctx->exception == POWERPC_EXCP_NONE && !tcg_op_buf_full()) {
         tcg_gen_insn_start(dcbase->pc_next);
-        ctx->base.num_insns++;
+        db->num_insns++;
 
-        if (unlikely(cpu_breakpoint_test(cpu, ctx->base.pc_next, BP_ANY))) {
+        if (unlikely(cpu_breakpoint_test(cpu, db->pc_next, BP_ANY))) {
             gen_debug_exception(ctx);
             /* The address covered by the breakpoint must be included in
                [tb->pc, tb->pc + tb->size) in order to for it to be
                properly cleared -- thus we increment the PC here so that
                the logic setting tb->size below does the right thing.  */
-            ctx->base.pc_next += 4;
+            db->pc_next += 4;
             break;
         }
 
         LOG_DISAS("----------------\n");
         LOG_DISAS("nip=" TARGET_FMT_lx " super=%d ir=%d\n",
-                  ctx->base.pc_next, ctx->mem_idx, (int)msr_ir);
-        if (ctx->base.num_insns == max_insns && (tb_cflags(tb) & CF_LAST_IO)) {
+                  db->pc_next, ctx->mem_idx, (int)msr_ir);
+        if (db->num_insns == max_insns && (tb_cflags(tb) & CF_LAST_IO)) {
             gen_io_start();
         }
         if (unlikely(need_byteswap(ctx))) {
-            ctx->opcode = bswap32(cpu_ldl_code(env, ctx->base.pc_next));
+            ctx->opcode = bswap32(cpu_ldl_code(env, db->pc_next));
         } else {
-            ctx->opcode = cpu_ldl_code(env, ctx->base.pc_next);
+            ctx->opcode = cpu_ldl_code(env, db->pc_next);
         }
         LOG_DISAS("translate opcode %08x (%02x %02x %02x %02x) (%s)\n",
                   ctx->opcode, opc1(ctx->opcode), opc2(ctx->opcode),
                   opc3(ctx->opcode), opc4(ctx->opcode),
                   ctx->le_mode ? "little" : "big");
-        ctx->base.pc_next += 4;
+        db->pc_next += 4;
         table = env->opcodes;
         handler = table[opc1(ctx->opcode)];
         if (is_indirect_opcode(handler)) {
@@ -7344,7 +7345,7 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
                           TARGET_FMT_lx " %d\n",
                           opc1(ctx->opcode), opc2(ctx->opcode),
                           opc3(ctx->opcode), opc4(ctx->opcode),
-                          ctx->opcode, ctx->base.pc_next - 4, (int)msr_ir);
+                          ctx->opcode, db->pc_next - 4, (int)msr_ir);
         } else {
             uint32_t inval;
 
@@ -7360,7 +7361,7 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
                               TARGET_FMT_lx "\n", ctx->opcode & inval,
                               opc1(ctx->opcode), opc2(ctx->opcode),
                               opc3(ctx->opcode), opc4(ctx->opcode),
-                              ctx->opcode, ctx->base.pc_next - 4);
+                              ctx->opcode, db->pc_next - 4);
                 gen_inval_exception(ctx, POWERPC_EXCP_INVAL_INVAL);
                 break;
             }
@@ -7371,16 +7372,16 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 #endif
         /* Check trace mode exceptions */
         if (unlikely(ctx->singlestep_enabled & CPU_SINGLE_STEP &&
-                     (ctx->base.pc_next <= 0x100 || ctx->base.pc_next > 0xF00) &&
+                     (db->pc_next <= 0x100 || db->pc_next > 0xF00) &&
                      ctx->exception != POWERPC_SYSCALL &&
                      ctx->exception != POWERPC_EXCP_TRAP &&
                      ctx->exception != POWERPC_EXCP_BRANCH)) {
-            gen_exception_nip(ctx, POWERPC_EXCP_TRACE, ctx->base.pc_next);
-        } else if (unlikely(((ctx->base.pc_next & (TARGET_PAGE_SIZE - 1))
+            gen_exception_nip(ctx, POWERPC_EXCP_TRACE, db->pc_next);
+        } else if (unlikely(((db->pc_next & (TARGET_PAGE_SIZE - 1))
                              == 0) ||
-                            (ctx->base.singlestep_enabled) ||
+                            (db->singlestep_enabled) ||
                             singlestep ||
-                            ctx->base.num_insns >= max_insns)) {
+                            db->num_insns >= max_insns)) {
             /* if we reach a page boundary or are single stepping, stop
              * generation
              */
@@ -7396,22 +7397,22 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     if (tb_cflags(tb) & CF_LAST_IO)
         gen_io_end();
     if (ctx->exception == POWERPC_EXCP_NONE) {
-        gen_goto_tb(ctx, 0, ctx->base.pc_next);
+        gen_goto_tb(ctx, 0, db->pc_next);
     } else if (ctx->exception != POWERPC_EXCP_BRANCH) {
-        if (unlikely(ctx->base.singlestep_enabled)) {
+        if (unlikely(db->singlestep_enabled)) {
             gen_debug_exception(ctx);
         }
         /* Generate the return instruction */
         tcg_gen_exit_tb(0);
     }
-    gen_tb_end(tb, ctx->base.num_insns);
+    gen_tb_end(tb, db->num_insns);
 
-    tb->size = ctx->base.pc_next - ctx->base.pc_first;
-    tb->icount = ctx->base.num_insns;
+    tb->size = db->pc_next - db->pc_first;
+    tb->icount = db->num_insns;
 
 #if defined(DEBUG_DISAS)
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
-        && qemu_log_in_addr_range(ctx->base.pc_first)) {
+        && qemu_log_in_addr_range(db->pc_first)) {
         qemu_log_lock();
         qemu_log("IN: %s\n", lookup_symbol(dcbase->pc_first));
         log_target_disas(cpu, dcbase->pc_first,
