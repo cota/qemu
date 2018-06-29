@@ -7213,6 +7213,7 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     CPUPPCState *env = cpu->env_ptr;
     DisasContext ctx_obj;
     DisasContext *ctx = &ctx_obj;
+    DisasContextBase *dcbase = &ctx_obj.base;
     opc_handler_t **table, *handler;
     int max_insns;
 
@@ -7293,7 +7294,7 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     tcg_clear_temp_count();
     /* Set env in case of segfault during code fetch */
     while (ctx->exception == POWERPC_EXCP_NONE && !tcg_op_buf_full()) {
-        tcg_gen_insn_start(ctx->base.pc_next);
+        tcg_gen_insn_start(dcbase->pc_next);
         ctx->base.num_insns++;
 
         if (unlikely(cpu_breakpoint_test(cpu, ctx->base.pc_next, BP_ANY))) {
@@ -7412,9 +7413,9 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
         && qemu_log_in_addr_range(ctx->base.pc_first)) {
         qemu_log_lock();
-        qemu_log("IN: %s\n", lookup_symbol(ctx->base.pc_first));
-        log_target_disas(cpu, ctx->base.pc_first,
-                         ctx->base.pc_next - ctx->base.pc_first);
+        qemu_log("IN: %s\n", lookup_symbol(dcbase->pc_first));
+        log_target_disas(cpu, dcbase->pc_first,
+                         dcbase->pc_next - dcbase->pc_first);
         qemu_log("\n");
         qemu_log_unlock();
     }
