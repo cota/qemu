@@ -7408,12 +7408,9 @@ static void ppc_tr_disas_log(const DisasContextBase *dcbase, CPUState *cs)
     log_target_disas(cs, dcbase->pc_first, dcbase->tb->size);
 }
 
-/*****************************************************************************/
-void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
+static void translator_loop_clone(const TranslatorOps *ops, DisasContextBase *db,
+                                  CPUState *cpu, TranslationBlock *tb)
 {
-    DisasContext ctx_obj;
-    DisasContextBase *db = &ctx_obj.base;
-
     int max_insns;
 
     /* Initialize DisasContext */
@@ -7425,7 +7422,7 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     db->singlestep_enabled = cpu->singlestep_enabled;
 
     /* Instruction counting */
-    max_insns = tb_cflags(tb) & CF_COUNT_MASK;
+    max_insns = tb_cflags(db->tb) & CF_COUNT_MASK;
     if (max_insns == 0) {
         max_insns = CF_COUNT_MASK;
     }
@@ -7436,7 +7433,7 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
         max_insns = 1;
     }
 
-    max_insns = ppc_tr_init_disas_context(db, cpu, max_insns);
+    max_insns = ops->init_disas_context(db, cpu, max_insns);
     tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
     /* Reset the temp count so that we can identify leaks */
@@ -7444,12 +7441,12 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 
     /* Start translating.  */
     gen_tb_start(db->tb);
-    ppc_tr_tb_start(db, cpu);
+    ops->tb_start(db, cpu);
     tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
     while (true) {
         db->num_insns++;
-        ppc_tr_insn_start(db, cpu);
+        ops->insn_start(db, cpu);
         tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
         /* Pass breakpoint hits to target for further processing */
@@ -7457,7 +7454,7 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
             CPUBreakpoint *bp;
             QTAILQ_FOREACH(bp, &cpu->breakpoints, entry) {
                 if (bp->pc == db->pc_next) {
-                    if (ppc_tr_breakpoint_check(db, cpu, bp)) {
+                    if (ops->breakpoint_check(db, cpu, bp)) {
                         break;
                     }
                 }
@@ -7478,10 +7475,10 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
         if (db->num_insns == max_insns && (tb_cflags(db->tb) & CF_LAST_IO)) {
             /* Accept I/O on the last instruction.  */
             gen_io_start();
-            ppc_tr_translate_insn(db, cpu);
+            ops->translate_insn(db, cpu);
             gen_io_end();
         } else {
-            ppc_tr_translate_insn(db, cpu);
+            ops->translate_insn(db, cpu);
         }
 
         /* Stop translation if translate_insn so indicated.  */
@@ -7498,7 +7495,7 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     }
 
     /* Emit code to exit the TB, as indicated by db->is_jmp.  */
-    ppc_tr_tb_stop(db, cpu);
+    ops->tb_stop(db, cpu);
     gen_tb_end(db->tb, db->num_insns);
 
     /* The disas_log hook may use these values rather than recompute.  */
@@ -7510,11 +7507,28 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
         && qemu_log_in_addr_range(db->pc_first)) {
         qemu_log_lock();
         qemu_log("----------------\n");
-        ppc_tr_disas_log(db, cpu);
+        ops->disas_log(db, cpu);
         qemu_log("\n");
         qemu_log_unlock();
     }
 #endif
+}
+
+static const TranslatorOps ppc_tr_ops = {
+    .init_disas_context = ppc_tr_init_disas_context,
+    .tb_start           = ppc_tr_tb_start,
+    .insn_start         = ppc_tr_insn_start,
+    .breakpoint_check   = ppc_tr_breakpoint_check,
+    .translate_insn     = ppc_tr_translate_insn,
+    .tb_stop            = ppc_tr_tb_stop,
+    .disas_log          = ppc_tr_disas_log,
+};
+
+void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
+{
+    DisasContext ctx;
+
+    translator_loop_clone(&ppc_tr_ops, &ctx.base, cs, tb);
 }
 
 void restore_state_to_opc(CPUPPCState *env, TranslationBlock *tb,
