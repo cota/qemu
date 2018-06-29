@@ -7208,14 +7208,14 @@ void ppc_cpu_dump_statistics(CPUState *cs, FILE*f,
 }
 
 /*****************************************************************************/
-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
+void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 {
-    CPUPPCState *env = cs->env_ptr;
+    CPUPPCState *env = cpu->env_ptr;
     DisasContext ctx, *ctxp = &ctx;
     opc_handler_t **table, *handler;
     int max_insns;
 
-    ctx.base.singlestep_enabled = cs->singlestep_enabled;
+    ctx.base.singlestep_enabled = cpu->singlestep_enabled;
     ctx.base.tb = tb;
     ctx.base.pc_first = tb->pc;
     ctx.base.pc_next = tb->pc; /* nip */
@@ -7295,7 +7295,7 @@ void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
         tcg_gen_insn_start(ctx.base.pc_next);
         ctx.base.num_insns++;
 
-        if (unlikely(cpu_breakpoint_test(cs, ctx.base.pc_next, BP_ANY))) {
+        if (unlikely(cpu_breakpoint_test(cpu, ctx.base.pc_next, BP_ANY))) {
             gen_debug_exception(ctxp);
             /* The address covered by the breakpoint must be included in
                [tb->pc, tb->pc + tb->size) in order to for it to be
@@ -7412,7 +7412,7 @@ void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
         && qemu_log_in_addr_range(ctx.base.pc_first)) {
         qemu_log_lock();
         qemu_log("IN: %s\n", lookup_symbol(ctx.base.pc_first));
-        log_target_disas(cs, ctx.base.pc_first,
+        log_target_disas(cpu, ctx.base.pc_first,
                          ctx.base.pc_next - ctx.base.pc_first);
         qemu_log("\n");
         qemu_log_unlock();
