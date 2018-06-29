@@ -7277,6 +7277,10 @@ static int ppc_tr_init_disas_context(DisasContextBase *db,
     return MIN(max_insns, bound);
 }
 
+static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
+{
+}
+
 /*****************************************************************************/
 void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 {
@@ -7312,8 +7316,14 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     max_insns = ppc_tr_init_disas_context(db, cpu, max_insns);
     tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
-    gen_tb_start(tb);
+    /* Reset the temp count so that we can identify leaks */
     tcg_clear_temp_count();
+
+    /* Start translating.  */
+    gen_tb_start(db->tb);
+    ppc_tr_tb_start(db, cpu);
+    tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
+
     /* Set env in case of segfault during code fetch */
     while (ctx->exception == POWERPC_EXCP_NONE && !tcg_op_buf_full()) {
         tcg_gen_insn_start(dcbase->pc_next);
