@@ -7286,6 +7286,20 @@ static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
     tcg_gen_insn_start(dcbase->pc_next);
 }
 
+static bool ppc_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cs,
+                                    const CPUBreakpoint *bp)
+{
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
+
+    gen_debug_exception(ctx);
+    /* The address covered by the breakpoint must be included in
+       [tb->pc, tb->pc + tb->size) in order to for it to be
+       properly cleared -- thus we increment the PC here so that
+       the logic setting tb->size below does the right thing.  */
+    ctx->base.pc_next += 4;
+    return true;
+}
+
 /*****************************************************************************/
 void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 {
@@ -7335,14 +7349,23 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
         ppc_tr_insn_start(db, cpu);
         tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
-        if (unlikely(cpu_breakpoint_test(cpu, db->pc_next, BP_ANY))) {
-            gen_debug_exception(ctx);
-            /* The address covered by the breakpoint must be included in
-               [tb->pc, tb->pc + tb->size) in order to for it to be
-               properly cleared -- thus we increment the PC here so that
-               the logic setting tb->size below does the right thing.  */
-            db->pc_next += 4;
-            break;
+        /* Pass breakpoint hits to target for further processing */
+        if (unlikely(!QTAILQ_EMPTY(&cpu->breakpoints))) {
+            CPUBreakpoint *bp;
+            QTAILQ_FOREACH(bp, &cpu->breakpoints, entry) {
+                if (bp->pc == db->pc_next) {
+                    if (ppc_tr_breakpoint_check(db, cpu, bp)) {
+                        break;
+                    }
+                }
+            }
+            /* The breakpoint_check hook may use DISAS_TOO_MANY to indicate
+               that only one more instruction is to be executed.  Otherwise
+               it should use DISAS_NORETURN when generating an exception,
+               but may use a DISAS_TARGET_* value for Something Else.  */
+            if (db->is_jmp > DISAS_TOO_MANY) {
+                break;
+            }
         }
 
         LOG_DISAS("----------------\n");
