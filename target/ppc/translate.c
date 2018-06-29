@@ -7281,6 +7281,11 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 {
 }
 
+static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
+{
+    tcg_gen_insn_start(dcbase->pc_next);
+}
+
 /*****************************************************************************/
 void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 {
@@ -7326,8 +7331,9 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 
     /* Set env in case of segfault during code fetch */
     while (ctx->exception == POWERPC_EXCP_NONE && !tcg_op_buf_full()) {
-        tcg_gen_insn_start(dcbase->pc_next);
         db->num_insns++;
+        ppc_tr_insn_start(db, cpu);
+        tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
         if (unlikely(cpu_breakpoint_test(cpu, db->pc_next, BP_ANY))) {
             gen_debug_exception(ctx);
