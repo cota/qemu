@@ -7207,22 +7207,12 @@ void ppc_cpu_dump_statistics(CPUState *cs, FILE*f,
 #endif
 }
 
-/*****************************************************************************/
-void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
+static int ppc_tr_init_disas_context(DisasContextBase *db,
+                                     CPUState *cs, int max_insns)
 {
-    CPUPPCState *env = cpu->env_ptr;
-    DisasContext ctx_obj;
-    DisasContext *ctx = &ctx_obj;
-    DisasContextBase *dcbase = &ctx_obj.base;
-    DisasContextBase *db = &ctx_obj.base;
-    opc_handler_t **table, *handler;
-    int max_insns;
-
-    db->singlestep_enabled = cpu->singlestep_enabled;
-    db->tb = tb;
-    db->pc_first = tb->pc;
-    db->pc_next = tb->pc; /* nip */
-    db->num_insns = 0;
+    DisasContext *ctx = container_of(db, DisasContext, base);
+    CPUPPCState *env = cs->env_ptr;
+    int bound;
 
     ctx->exception = POWERPC_EXCP_NONE;
     ctx->spr_cb = env->spr_cb;
@@ -7282,7 +7272,32 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     /* Single step trace mode */
     msr_se = 1;
 #endif
+
+    bound = -(ctx->base.pc_first | TARGET_PAGE_MASK) / 4;
+    return MIN(max_insns, bound);
+}
+
+/*****************************************************************************/
+void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
+{
+    CPUPPCState *env = cpu->env_ptr;
+    DisasContext ctx_obj;
+    DisasContext *ctx = &ctx_obj;
+    DisasContextBase *dcbase = &ctx_obj.base;
+    DisasContextBase *db = &ctx_obj.base;
+    opc_handler_t **table, *handler;
+
+    int max_insns;
+
+    /* Initialize DisasContext */
+    db->tb = tb;
+    db->pc_first = tb->pc;
+    db->pc_next = db->pc_first;
+    db->is_jmp = DISAS_NEXT;
     db->num_insns = 0;
+    db->singlestep_enabled = cpu->singlestep_enabled;
+
+    /* Instruction counting */
     max_insns = tb_cflags(tb) & CF_COUNT_MASK;
     if (max_insns == 0) {
         max_insns = CF_COUNT_MASK;
@@ -7290,6 +7305,12 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     if (max_insns > TCG_MAX_INSNS) {
         max_insns = TCG_MAX_INSNS;
     }
+    if (db->singlestep_enabled || singlestep) {
+        max_insns = 1;
+    }
+
+    max_insns = ppc_tr_init_disas_context(db, cpu, max_insns);
+    tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
     gen_tb_start(tb);
     tcg_clear_temp_count();
