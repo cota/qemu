@@ -7387,11 +7387,25 @@ static void ppc_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
         DISAS_NEXT : DISAS_NORETURN;
 }
 
+static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
+{
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
+
+    if (ctx->exception == POWERPC_EXCP_NONE) {
+        gen_goto_tb(ctx, 0, ctx->base.pc_next);
+    } else if (ctx->exception != POWERPC_EXCP_BRANCH) {
+        if (unlikely(ctx->base.singlestep_enabled)) {
+            gen_debug_exception(ctx);
+        }
+        /* Generate the return instruction */
+        tcg_gen_exit_tb(0);
+    }
+}
+
 /*****************************************************************************/
 void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 {
     DisasContext ctx_obj;
-    DisasContext *ctx = &ctx_obj;
     DisasContextBase *dcbase = &ctx_obj.base;
     DisasContextBase *db = &ctx_obj.base;
 
@@ -7477,16 +7491,10 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
             break;
         }
     }
-    if (ctx->exception == POWERPC_EXCP_NONE) {
-        gen_goto_tb(ctx, 0, db->pc_next);
-    } else if (ctx->exception != POWERPC_EXCP_BRANCH) {
-        if (unlikely(db->singlestep_enabled)) {
-            gen_debug_exception(ctx);
-        }
-        /* Generate the return instruction */
-        tcg_gen_exit_tb(0);
-    }
-    gen_tb_end(tb, db->num_insns);
+
+    /* Emit code to exit the TB, as indicated by db->is_jmp.  */
+    ppc_tr_tb_stop(db, cpu);
+    gen_tb_end(db->tb, db->num_insns);
 
     tb->size = db->pc_next - db->pc_first;
     tb->icount = db->num_insns;
