@@ -7402,11 +7402,16 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     }
 }
 
+static void ppc_tr_disas_log(const DisasContextBase *dcbase, CPUState *cs)
+{
+    qemu_log("IN: %s\n", lookup_symbol(dcbase->pc_first));
+    log_target_disas(cs, dcbase->pc_first, dcbase->tb->size);
+}
+
 /*****************************************************************************/
 void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
 {
     DisasContext ctx_obj;
-    DisasContextBase *dcbase = &ctx_obj.base;
     DisasContextBase *db = &ctx_obj.base;
 
     int max_insns;
@@ -7496,16 +7501,16 @@ void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb)
     ppc_tr_tb_stop(db, cpu);
     gen_tb_end(db->tb, db->num_insns);
 
-    tb->size = db->pc_next - db->pc_first;
-    tb->icount = db->num_insns;
+    /* The disas_log hook may use these values rather than recompute.  */
+    db->tb->size = db->pc_next - db->pc_first;
+    db->tb->icount = db->num_insns;
 
-#if defined(DEBUG_DISAS)
+#ifdef DEBUG_DISAS
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
         && qemu_log_in_addr_range(db->pc_first)) {
         qemu_log_lock();
-        qemu_log("IN: %s\n", lookup_symbol(dcbase->pc_first));
-        log_target_disas(cpu, dcbase->pc_first,
-                         dcbase->pc_next - dcbase->pc_first);
+        qemu_log("----------------\n");
+        ppc_tr_disas_log(db, cpu);
         qemu_log("\n");
         qemu_log_unlock();
     }
