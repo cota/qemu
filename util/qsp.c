@@ -344,38 +344,58 @@ static gint qsp_tree_cmp(gconstpointer ap, gconstpointer bp, gpointer up)
 {
     const struct qsp_entry *a = ap;
     const struct qsp_entry *b = bp;
+    enum qsp_sort_by sort_by = *(enum qsp_sort_by *)up;
+    const struct qsp_callsite *ca;
+    const struct qsp_callsite *cb;
 
-    if (a->ns > b->ns) {
+    switch (sort_by) {
+    case QSP_SORT_BY_TOTAL_WAIT_TIME:
+        if (a->ns > b->ns) {
+            return -1;
+        } else if (a->ns < b->ns) {
+            return 1;
+        }
+        break;
+    case QSP_SORT_BY_AVG_WAIT_TIME:
+    {
+        double avg_a = a->n_acqs ? a->ns / a->n_acqs : 0;
+        double avg_b = b->n_acqs ? b->ns / b->n_acqs : 0;
+
+        if (avg_a > avg_b) {
+            return -1;
+        } else if (avg_a < avg_b) {
+            return 1;
+        }
+        break;
+    }
+    default:
+        g_assert_not_reached();
+    }
+
+    ca = a->callsite;
+    cb = b->callsite;
+    /* Break the tie with the object's address */
+    if (ca->obj < cb->obj) {
         return -1;
-    } else if (a->ns < b->ns) {
+    } else if (ca->obj > cb->obj) {
         return 1;
     } else {
-        const struct qsp_callsite *ca = a->callsite;
-        const struct qsp_callsite *cb = b->callsite;
+        int cmp;
 
-        /* same ns. Break the tie with the object's address */
-        if (ca->obj < cb->obj) {
+        /* same obj. Break the tie with the callsite's file */
+        cmp = strcmp(ca->file, cb->file);
+        if (cmp) {
+            return cmp;
+        }
+        /* same callsite file. Break the tie with the callsite's line */
+        g_assert(ca->line != cb->line);
+        if (ca->line < cb->line) {
             return -1;
-        } else if (ca->obj > cb->obj) {
+        } else if (ca->line > cb->line) {
             return 1;
         } else {
-            int cmp;
-
-            /* same obj. Break the tie with the callsite's file */
-            cmp = strcmp(ca->file, cb->file);
-            if (cmp) {
-                return cmp;
-            }
-            /* same callsite file. Break the tie with the callsite's line */
-            g_assert(ca->line != cb->line);
-            if (ca->line < cb->line) {
-                return -1;
-            } else if (ca->line > cb->line) {
-                return 1;
-            } else {
-                /* break the tie with the callsite's type */
-                return cb->type - ca->type;
-            }
+            /* break the tie with the callsite's type */
+            return cb->type - ca->type;
         }
     }
 }
@@ -529,9 +549,10 @@ static void report_destroy(struct qsp_report *rep)
     g_free(rep->entries);
 }
 
-void qsp_report(FILE *f, fprintf_function cpu_fprintf, size_t max)
+void qsp_report(FILE *f, fprintf_function cpu_fprintf, size_t max,
+                enum qsp_sort_by sort_by)
 {
-    GTree *tree = g_tree_new_full(qsp_tree_cmp, NULL, g_free, NULL);
+    GTree *tree = g_tree_new_full(qsp_tree_cmp, &sort_by, g_free, NULL);
     struct qsp_report rep;
 
     qsp_init();

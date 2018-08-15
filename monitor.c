@@ -1457,8 +1457,11 @@ static void hmp_info_opcount(Monitor *mon, const QDict *qdict)
 static void hmp_info_sync_profile(Monitor *mon, const QDict *qdict)
 {
     int64_t max = qdict_get_try_int(qdict, "max", 10);
+    bool avg = qdict_get_try_bool(qdict, "average", false);
+    enum qsp_sort_by sort_by;
 
-    qsp_report((FILE *)mon, monitor_fprintf, max);
+    sort_by = avg ? QSP_SORT_BY_AVG_WAIT_TIME : QSP_SORT_BY_TOTAL_WAIT_TIME;
+    qsp_report((FILE *)mon, monitor_fprintf, max, sort_by);
 }
 
 static void hmp_info_history(Monitor *mon, const QDict *qdict)

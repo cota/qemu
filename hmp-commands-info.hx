@@ -301,11 +301,12 @@ ETEXI
 
     {
         .name       = "sync-profile",
-        .args_type  = "max:i?",
-        .params     = "[max]",
+        .args_type  = "average:-m,max:i?",
+        .params     = "[-m] [max]",
         .help       = "show sync profiling info for "
 	              "up to max entries (default: 10). "
-		      "Entries are sorted by wait time.",
+		      "By default, entries are sorted by total wait time; "
+		      "-m sorts by mean wait time.",
         .cmd        = hmp_info_sync_profile,
     },
 

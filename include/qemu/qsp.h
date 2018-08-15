@@ -13,6 +13,11 @@
 
 #include "qemu/fprintf-fn.h"
 
+enum qsp_sort_by {
+    QSP_SORT_BY_TOTAL_WAIT_TIME,
+    QSP_SORT_BY_AVG_WAIT_TIME,
+};
+
 #ifdef CONFIG_SYNC_PROFILER
 
 void qsp_mutex_lock(QemuMutex *mutex, const char *file, unsigned line);
@@ -26,11 +31,13 @@ int qsp_rec_mutex_trylock(QemuRecMutex *mutex, const char *file, unsigned line);
 void qsp_cond_wait(QemuCond *cond, QemuMutex *mutex, const char *file,
                    unsigned line);
 
-void qsp_report(FILE *f, fprintf_function cpu_fprintf, size_t max);
+void qsp_report(FILE *f, fprintf_function cpu_fprintf, size_t max,
+                enum qsp_sort_by sort_by);
 
 #else /* !CONF_SYNC_PROFILER */
 
-static inline void qsp_report(FILE *f, fprintf_function cpu_fprintf, size_t max)
+static inline void qsp_report(FILE *f, fprintf_function cpu_fprintf, size_t max,
+                              enum qsp_sort_by sort_by)
 {
     cpu_fprintf(f, "[Sync profiler not compiled]\n");
 }
