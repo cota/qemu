@@ -300,18 +300,18 @@ Show dynamic compiler opcode counters
 ETEXI
 
     {
-        .name       = "sync",
+        .name       = "sync-profile",
         .args_type  = "max:i?",
         .params     = "[max]",
         .help       = "show sync profiling info for "
 	              "up to max entries (default: 10). "
 		      "Entries are sorted by wait time.",
-        .cmd        = hmp_info_sync,
+        .cmd        = hmp_info_sync_profile,
     },
 
 STEXI
-@item info sync
-@findex sync
+@item info sync-profile
+@findex sync-profile
 Show sync profiling info.
 ETEXI
 

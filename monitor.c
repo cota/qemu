@@ -1454,7 +1454,7 @@ static void hmp_info_opcount(Monitor *mon, const QDict *qdict)
 }
 #endif
 
-static void hmp_info_sync(Monitor *mon, const QDict *qdict)
+static void hmp_info_sync_profile(Monitor *mon, const QDict *qdict)
 {
     int64_t max = qdict_get_try_int(qdict, "max", 10);
 
