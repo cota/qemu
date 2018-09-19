@@ -90,7 +90,8 @@ bool cpu_is_stopped(CPUState *cpu)
 
 static bool cpu_thread_is_idle(CPUState *cpu)
 {
-    if (cpu->stop || cpu->queued_work_first) {
+    /* XXX work_list lock */
+    if (cpu->stop || !QSIMPLEQ_EMPTY_ATOMIC(&cpu->work_list)) {
         return false;
     }
     if (cpu_is_stopped(cpu)) {
@@ -1486,7 +1487,9 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
             cpu = first_cpu;
         }
 
-        while (cpu && !cpu->queued_work_first && !cpu->exit_request) {
+        /* XXX work_list lock */
+        while (cpu && QSIMPLEQ_EMPTY_ATOMIC(&cpu->work_list) &&
+               !cpu->exit_request) {
 
             atomic_mb_set(&tcg_current_rr_cpu, cpu);
             current_cpu = cpu;
