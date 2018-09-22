@@ -319,12 +319,11 @@ void async_safe_run_on_cpu(CPUState *cpu, run_on_cpu_func func,
     queue_work_on_cpu(cpu, wi);
 }
 
-void process_queued_cpu_work(CPUState *cpu)
+void process_queued_cpu_work_locked(CPUState *cpu)
 {
     struct qemu_work_item *wi;
     bool has_bql = qemu_mutex_iothread_locked();
 
-    qemu_mutex_lock(&cpu->lock);
     while (!QSIMPLEQ_EMPTY(&cpu->work_list)) {
         wi = QSIMPLEQ_FIRST(&cpu->work_list);
         QSIMPLEQ_REMOVE_HEAD(&cpu->work_list, node);
@@ -361,6 +360,12 @@ void process_queued_cpu_work(CPUState *cpu)
             atomic_mb_set(&wi->done, true);
         }
     }
-    qemu_mutex_unlock(&cpu->lock);
     qemu_cond_broadcast(&cpu->cond);
+}
+
+void process_queued_cpu_work(CPUState *cpu)
+{
+    qemu_mutex_lock(&cpu->lock);
+    process_queued_cpu_work_locked(cpu);
+    qemu_mutex_unlock(&cpu->lock);
 }
