@@ -126,7 +126,7 @@ static void queue_work_on_cpu(CPUState *cpu, struct qemu_work_item *wi)
     qemu_mutex_unlock(&cpu->lock);
 }
 
-void do_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
+static void do_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
 {
     struct qemu_work_item wi;
 
@@ -156,6 +156,11 @@ void do_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
     qemu_mutex_unlock(&cpu->lock);
 
     qemu_mutex_lock_iothread();
+}
+
+void run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
+{
+    do_run_on_cpu(cpu, func, data);
 }
 
 void async_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
