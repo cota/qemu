@@ -148,37 +148,26 @@ struct Notifier;
 void qemu_thread_atexit_add(struct Notifier *notifier);
 void qemu_thread_atexit_remove(struct Notifier *notifier);
 
-struct QemuSpin {
-    int value;
-};
+typedef QemuMutex QemuSpin;
 
 static inline void qemu_spin_init(QemuSpin *spin)
 {
-    __sync_lock_release(&spin->value);
+    qemu_mutex_init(spin);
 }
 
 static inline void qemu_spin_lock(QemuSpin *spin)
 {
-    while (unlikely(__sync_lock_test_and_set(&spin->value, true))) {
-        while (atomic_read(&spin->value)) {
-            cpu_relax();
-        }
-    }
+    qemu_mutex_lock(spin);
 }
 
 static inline bool qemu_spin_trylock(QemuSpin *spin)
 {
-    return __sync_lock_test_and_set(&spin->value, true);
-}
-
-static inline bool qemu_spin_locked(QemuSpin *spin)
-{
-    return atomic_read(&spin->value);
+    return qemu_mutex_trylock(spin);
 }
 
 static inline void qemu_spin_unlock(QemuSpin *spin)
 {
-    __sync_lock_release(&spin->value);
+    qemu_mutex_unlock(spin);
 }
 
 struct QemuLockCnt {

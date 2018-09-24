@@ -135,8 +135,6 @@ struct qht_bucket {
     struct qht_bucket *next;
 } QEMU_ALIGNED(QHT_BUCKET_ALIGN);
 
-QEMU_BUILD_BUG_ON(sizeof(struct qht_bucket) > QHT_BUCKET_ALIGN);
-
 /**
  * struct qht_map - structure to track an array of buckets
  * @rcu: used by RCU. Keep it as the top field in the struct to help valgrind
