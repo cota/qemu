@@ -355,7 +355,7 @@ struct CPUState {
     QemuMutex lock;
     /* fields below protected by @lock */
     QemuCond cond;
-    QemuCond *halt_cond;
+    QemuCond halt_cond;
     QSIMPLEQ_HEAD(, qemu_work_item) work_list;
     uint32_t halted;
     bool created;

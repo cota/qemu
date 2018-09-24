@@ -1258,7 +1258,7 @@ static void qemu_tcg_rr_wait_io_event(CPUState *cpu)
         qemu_mutex_unlock_iothread();
 
         cpu_mutex_lock(cpu);
-        qemu_cond_wait(cpu->halt_cond, &cpu->lock);
+        qemu_cond_wait(&cpu->halt_cond, &cpu->lock);
         cpu_mutex_unlock(cpu);
 
         qemu_mutex_lock_iothread();
@@ -1277,7 +1277,7 @@ static void qemu_wait_io_event(CPUState *cpu)
     g_assert(!qemu_mutex_iothread_locked());
 
     while (cpu_thread_is_idle(cpu)) {
-        qemu_cond_wait(cpu->halt_cond, &cpu->lock);
+        qemu_cond_wait(&cpu->halt_cond, &cpu->lock);
     }
 
 #ifdef _WIN32
@@ -1536,7 +1536,7 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
     /* wait for initial kick-off after machine start */
     cpu_mutex_lock(first_cpu);
     while (first_cpu->stopped) {
-        qemu_cond_wait(first_cpu->halt_cond, &first_cpu->lock);
+        qemu_cond_wait(&first_cpu->halt_cond, &first_cpu->lock);
         cpu_mutex_unlock(first_cpu);
 
         /* process any pending work */
@@ -1777,7 +1777,7 @@ static void *qemu_whpx_cpu_thread_fn(void *arg)
             }
         }
         while (cpu_thread_is_idle(cpu)) {
-            qemu_cond_wait(cpu->halt_cond, &cpu->lock);
+            qemu_cond_wait(&cpu->halt_cond, &cpu->lock);
         }
         qemu_wait_io_event_common(cpu);
     } while (!cpu->unplug || cpu_can_run(cpu));
@@ -1902,7 +1902,7 @@ static void qemu_cpu_kick_thread(CPUState *cpu)
 
 void qemu_cpu_kick(CPUState *cpu)
 {
-    qemu_cond_broadcast(cpu->halt_cond);
+    qemu_cond_broadcast(&cpu->halt_cond);
     if (tcg_enabled()) {
         cpu_exit(cpu);
         /* NOP unless doing single-thread RR */
@@ -2049,7 +2049,6 @@ void cpu_remove_sync(CPUState *cpu)
 static void qemu_tcg_init_vcpu(CPUState *cpu)
 {
     char thread_name[VCPU_THREAD_NAME_SIZE];
-    static QemuCond *single_tcg_halt_cond;
     static QemuThread *single_tcg_cpu_thread;
     static int tcg_region_inited;
 
@@ -2067,8 +2066,6 @@ static void qemu_tcg_init_vcpu(CPUState *cpu)
 
     if (qemu_tcg_mttcg_enabled() || !single_tcg_cpu_thread) {
         cpu->thread = g_malloc0(sizeof(QemuThread));
-        cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-        qemu_cond_init(cpu->halt_cond);
 
         if (qemu_tcg_mttcg_enabled()) {
             /* create a thread per vCPU with TCG (MTTCG) */
@@ -2086,7 +2083,6 @@ static void qemu_tcg_init_vcpu(CPUState *cpu)
                                qemu_tcg_rr_cpu_thread_fn,
                                cpu, QEMU_THREAD_JOINABLE);
 
-            single_tcg_halt_cond = cpu->halt_cond;
             single_tcg_cpu_thread = cpu->thread;
         }
 #ifdef _WIN32
@@ -2095,7 +2091,6 @@ static void qemu_tcg_init_vcpu(CPUState *cpu)
     } else {
         /* For non-MTTCG cases we share the thread */
         cpu->thread = single_tcg_cpu_thread;
-        cpu->halt_cond = single_tcg_halt_cond;
         cpu->thread_id = first_cpu->thread_id;
         cpu->can_do_io = 1;
         cpu->created = true;
@@ -2107,8 +2102,6 @@ static void qemu_hax_start_vcpu(CPUState *cpu)
     char thread_name[VCPU_THREAD_NAME_SIZE];
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
 
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/HAX",
              cpu->cpu_index);
@@ -2124,8 +2117,6 @@ static void qemu_kvm_start_vcpu(CPUState *cpu)
     char thread_name[VCPU_THREAD_NAME_SIZE];
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/KVM",
              cpu->cpu_index);
     qemu_thread_create(cpu->thread, thread_name, qemu_kvm_cpu_thread_fn,
@@ -2141,8 +2132,6 @@ static void qemu_hvf_start_vcpu(CPUState *cpu)
     assert(hvf_enabled());
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
 
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/HVF",
              cpu->cpu_index);
@@ -2155,8 +2144,6 @@ static void qemu_whpx_start_vcpu(CPUState *cpu)
     char thread_name[VCPU_THREAD_NAME_SIZE];
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/WHPX",
              cpu->cpu_index);
     qemu_thread_create(cpu->thread, thread_name, qemu_whpx_cpu_thread_fn,
@@ -2171,8 +2158,6 @@ static void qemu_dummy_start_vcpu(CPUState *cpu)
     char thread_name[VCPU_THREAD_NAME_SIZE];
 
     cpu->thread = g_malloc0(sizeof(QemuThread));
-    cpu->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(cpu->halt_cond);
     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/DUMMY",
              cpu->cpu_index);
     qemu_thread_create(cpu->thread, thread_name, qemu_dummy_cpu_thread_fn, cpu,
