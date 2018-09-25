@@ -1204,8 +1204,9 @@ static void handle_even_inj(CPUX86State *env, int intno, int is_int,
  * the int instruction. next_eip is the env->eip value AFTER the interrupt
  * instruction. It is only relevant if is_int is TRUE.
  */
-static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
-                             int error_code, target_ulong next_eip, int is_hw)
+static void do_interrupt_all_locked(X86CPU *cpu, int intno, int is_int,
+                                    int error_code, target_ulong next_eip,
+                                    int is_hw)
 {
     CPUX86State *env = &cpu->env;
 
@@ -1279,6 +1280,18 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
                  event_inj & ~SVM_EVTINJ_VALID);
     }
 #endif
+}
+
+static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
+                             int error_code, target_ulong next_eip, int is_hw)
+{
+    if (qemu_mutex_iothread_locked()) {
+        do_interrupt_all_locked(cpu, intno, is_int, error_code, next_eip, is_hw);
+    } else {
+        qemu_mutex_lock_iothread();
+        do_interrupt_all_locked(cpu, intno, is_int, error_code, next_eip, is_hw);
+        qemu_mutex_unlock_iothread();
+    }
 }
 
 void x86_cpu_do_interrupt(CPUState *cs)
