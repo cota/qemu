@@ -1329,7 +1329,7 @@ void do_interrupt_x86_hardirq(CPUX86State *env, int intno, int is_hw)
     do_interrupt_all(x86_env_get_cpu(env), intno, 0, 0, 0, is_hw);
 }
 
-bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
+static bool x86_cpu_exec_interrupt_locked(CPUState *cs, int interrupt_request)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
@@ -1338,9 +1338,7 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 #if !defined(CONFIG_USER_ONLY)
     if (interrupt_request & CPU_INTERRUPT_POLL) {
         cpu_reset_interrupt(cs, CPU_INTERRUPT_POLL);
-        qemu_mutex_lock_iothread();
         apic_poll_irq(cpu->apic_state);
-        qemu_mutex_unlock_iothread();
         /* Don't process multiple interrupt requests in a single call.
            This is required to make icount-driven execution deterministic. */
         return true;
@@ -1401,6 +1399,16 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         }
     }
 
+    return ret;
+}
+
+bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
+{
+    bool ret;
+
+    qemu_mutex_lock_iothread();
+    ret = x86_cpu_exec_interrupt_locked(cs, interrupt_request);
+    qemu_mutex_unlock_iothread();
     return ret;
 }
 
