@@ -3153,7 +3153,7 @@ static void gen_ldst_thunk(TCGContext *s, TCGMemOp opc, bool is_load)
     tcg_out_mov(s, tlbtype, t0, addrlo);
 
     tcg_out_shifti(s, SHIFT_SHL + tlbrexw, t1,
-                   CPU_TLB_ENTRY_BITS + ctz32(CPU_TLB_SIZE));
+                   CPU_TLB_ENTRY_BITS + CPU_TLB_BITS);
     tcg_out_shifti(s, SHIFT_SHR + tlbrexw, t0,
                    TARGET_PAGE_BITS - CPU_TLB_ENTRY_BITS);
 
@@ -3208,6 +3208,8 @@ static void gen_ldst_thunk(TCGContext *s, TCGMemOp opc, bool is_load)
      * TLB Hit.
      */
 
+    tcg_out_mov(s, ttype, t1, addrlo);
+
     /* add addend(r0), r1 */
     tcg_out_modrm_offset(s, OPC_ADD_GvEv + hrexw, t1, t0,
                          offsetof(CPUTLBEntry, addend));
@@ -3241,7 +3243,6 @@ static void gen_ldst_thunk(TCGContext *s, TCGMemOp opc, bool is_load)
         tcg_out_jmp(s, qemu_st_helpers[opc & (MO_BSWAP | MO_SSIZE)]);
     }
 }
-#endif
 
 static tcg_insn_unit *tcg_out_nop_align4(TCGContext *s)
 {
@@ -3254,6 +3255,7 @@ static tcg_insn_unit *tcg_out_nop_align4(TCGContext *s)
     }
     return e;
 }
+#endif
 
 /* Generate global QEMU prologue and epilogue code */
 static void tcg_target_qemu_prologue(TCGContext *s)
