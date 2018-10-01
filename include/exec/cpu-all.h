@@ -362,6 +362,20 @@ static inline bool tlb_hit(target_ulong tlb_addr, target_ulong addr)
     return tlb_hit_page(tlb_addr, addr & TARGET_PAGE_MASK);
 }
 
+/**
+ * tlb_is_valid - return true if at least one of the addresses is valid
+ * @te: pointer to CPUTLBEntry
+ *
+ * This is useful when we don't have a particular address to compare against,
+ * and we just want to know whether any entry holds valid data.
+ */
+static inline bool tlb_is_valid(const CPUTLBEntry *te)
+{
+    return !(te->addr_read & TLB_INVALID_MASK) ||
+           !(te->addr_write & TLB_INVALID_MASK) ||
+           !(te->addr_code & TLB_INVALID_MASK);
+}
+
 void dump_exec_info(FILE *f, fprintf_function cpu_fprintf);
 void dump_opcount_info(FILE *f, fprintf_function cpu_fprintf);
 #endif /* !CONFIG_USER_ONLY */
