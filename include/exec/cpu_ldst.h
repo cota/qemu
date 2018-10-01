@@ -416,7 +416,7 @@ static inline void *tlb_vaddr_to_host(CPUArchState *env, abi_ptr addr,
 #if defined(CONFIG_USER_ONLY)
     return g2h(addr);
 #else
-    int index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+    int index = (addr >> TARGET_PAGE_BITS) & (env->tlb_desc[mmu_idx].size - 1);
     CPUTLBEntry *tlbentry = &env->tlb_table[mmu_idx][index];
     abi_ptr tlb_addr;
     uintptr_t haddr;

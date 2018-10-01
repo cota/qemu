@@ -112,7 +112,7 @@ WORD_TYPE helper_le_ld_name(CPUArchState *env, target_ulong addr,
                             TCGMemOpIdx oi, uintptr_t retaddr)
 {
     unsigned mmu_idx = get_mmuidx(oi);
-    int index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+    int index = (addr >> TARGET_PAGE_BITS) & (env->tlb_desc[mmu_idx].size - 1);
     target_ulong tlb_addr = env->tlb_table[mmu_idx][index].ADDR_READ;
     unsigned a_bits = get_alignment_bits(get_memop(oi));
     uintptr_t haddr;
@@ -180,7 +180,7 @@ WORD_TYPE helper_be_ld_name(CPUArchState *env, target_ulong addr,
                             TCGMemOpIdx oi, uintptr_t retaddr)
 {
     unsigned mmu_idx = get_mmuidx(oi);
-    int index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+    int index = (addr >> TARGET_PAGE_BITS) & (env->tlb_desc[mmu_idx].size - 1);
     target_ulong tlb_addr = env->tlb_table[mmu_idx][index].ADDR_READ;
     unsigned a_bits = get_alignment_bits(get_memop(oi));
     uintptr_t haddr;
@@ -276,7 +276,7 @@ void helper_le_st_name(CPUArchState *env, target_ulong addr, DATA_TYPE val,
                        TCGMemOpIdx oi, uintptr_t retaddr)
 {
     unsigned mmu_idx = get_mmuidx(oi);
-    int index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+    int index = (addr >> TARGET_PAGE_BITS) & (env->tlb_desc[mmu_idx].size - 1);
     target_ulong tlb_addr =
         atomic_read(&env->tlb_table[mmu_idx][index].addr_write);
     unsigned a_bits = get_alignment_bits(get_memop(oi));
@@ -322,7 +322,8 @@ void helper_le_st_name(CPUArchState *env, target_ulong addr, DATA_TYPE val,
            is already guaranteed to be filled, and that the second page
            cannot evict the first.  */
         page2 = (addr + DATA_SIZE) & TARGET_PAGE_MASK;
-        index2 = (page2 >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+        index2 = (page2 >> TARGET_PAGE_BITS) &
+            (env->tlb_desc[mmu_idx].size - 1);
         tlb_addr2 = atomic_read(&env->tlb_table[mmu_idx][index2].addr_write);
         if (!tlb_hit_page(tlb_addr2, page2)
             && !VICTIM_TLB_HIT(addr_write, page2)) {
@@ -355,7 +356,7 @@ void helper_be_st_name(CPUArchState *env, target_ulong addr, DATA_TYPE val,
                        TCGMemOpIdx oi, uintptr_t retaddr)
 {
     unsigned mmu_idx = get_mmuidx(oi);
-    int index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+    int index = (addr >> TARGET_PAGE_BITS) & (env->tlb_desc[mmu_idx].size - 1);
     target_ulong tlb_addr =
         atomic_read(&env->tlb_table[mmu_idx][index].addr_write);
     unsigned a_bits = get_alignment_bits(get_memop(oi));
@@ -401,7 +402,8 @@ void helper_be_st_name(CPUArchState *env, target_ulong addr, DATA_TYPE val,
            is already guaranteed to be filled, and that the second page
            cannot evict the first.  */
         page2 = (addr + DATA_SIZE) & TARGET_PAGE_MASK;
-        index2 = (page2 >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+        index2 = (page2 >> TARGET_PAGE_BITS) &
+            (env->tlb_desc[mmu_idx].size - 1);
         tlb_addr2 = atomic_read(&env->tlb_table[mmu_idx][index2].addr_write);
         if (!tlb_hit_page(tlb_addr2, page2)
             && !VICTIM_TLB_HIT(addr_write, page2)) {

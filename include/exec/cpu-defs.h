@@ -141,13 +141,19 @@ typedef struct CPUIOTLBEntry {
     MemTxAttrs attrs;
 } CPUIOTLBEntry;
 
-#define CPU_COMMON_TLB \
+typedef struct CPUTLBDesc {
+    size_t size;
+    size_t mask; /* (.size - 1) << CPU_TLB_ENTRY_BITS for TLB fast path */
+} CPUTLBDesc;
+
+#define CPU_COMMON_TLB  \
     /* The meaning of the MMU modes is defined in the target code. */   \
-    /* tlb_lock serializes updates to tlb_table and tlb_v_table */      \
+    /* tlb_lock serializes updates to tlb_desc, tlb_table and tlb_v_table */ \
     QemuSpin tlb_lock;                                                  \
-    CPUTLBEntry tlb_table[NB_MMU_MODES][CPU_TLB_SIZE];                  \
+    CPUTLBDesc tlb_desc[NB_MMU_MODES];                                  \
+    CPUTLBEntry *tlb_table[NB_MMU_MODES];                               \
     CPUTLBEntry tlb_v_table[NB_MMU_MODES][CPU_VTLB_SIZE];               \
-    CPUIOTLBEntry iotlb[NB_MMU_MODES][CPU_TLB_SIZE];                    \
+    CPUIOTLBEntry *iotlb[NB_MMU_MODES];                                 \
     CPUIOTLBEntry iotlb_v[NB_MMU_MODES][CPU_VTLB_SIZE];                 \
     size_t tlb_flush_count;                                             \
     target_ulong tlb_flush_addr;                                        \
