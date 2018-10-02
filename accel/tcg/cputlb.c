@@ -85,6 +85,7 @@ void tlb_init(CPUState *cpu)
         desc->size = MIN_CPU_TLB_SIZE;
         desc->mask = (desc->size - 1) << CPU_TLB_ENTRY_BITS;
         desc->used = 0;
+        desc->n_flushes_low_rate = 0;
         env->tlb_table[i] = g_new(CPUTLBEntry, desc->size);
         env->iotlb[i] = g_new0(CPUIOTLBEntry, desc->size);
     }
@@ -122,6 +123,39 @@ size_t tlb_flush_count(void)
     return count;
 }
 
+/* Call with tlb_lock held */
+static void tlb_mmu_resize_locked(CPUArchState *env, int mmu_idx)
+{
+    CPUTLBDesc *desc = &env->tlb_desc[mmu_idx];
+    size_t rate = desc->used * 100 / desc->size;
+    size_t new_size = desc->size;
+
+    if (rate == 100) {
+        new_size = MIN(desc->size << 2, 1 << TCG_TARGET_TLB_MAX_INDEX_BITS);
+    } else if (rate > 70) {
+        new_size = MIN(desc->size << 1, 1 << TCG_TARGET_TLB_MAX_INDEX_BITS);
+    } else if (rate < 30) {
+        desc->n_flushes_low_rate++;
+        if (desc->n_flushes_low_rate == 100) {
+            new_size = MAX(desc->size >> 1, 1 << MIN_CPU_TLB_BITS);
+            desc->n_flushes_low_rate = 0;
+        }
+    }
+
+    if (new_size == desc->size) {
+        return;
+    }
+
+    g_free(env->tlb_table[mmu_idx]);
+    g_free(env->iotlb[mmu_idx]);
+
+    desc->size = new_size;
+    desc->mask = (desc->size - 1) << CPU_TLB_ENTRY_BITS;
+    desc->n_flushes_low_rate = 0;
+    env->tlb_table[mmu_idx] = g_new(CPUTLBEntry, desc->size);
+    env->iotlb[mmu_idx] = g_new0(CPUIOTLBEntry, desc->size);
+}
+
 /* This is OK because CPU architectures generally permit an
  * implementation to drop entries from the TLB at any time, so
  * flushing more entries than required is only an efficiency issue,
@@ -151,6 +185,7 @@ static void tlb_flush_nocheck(CPUState *cpu)
      */
     qemu_spin_lock(&env->tlb_lock);
     for (i = 0; i < NB_MMU_MODES; i++) {
+        tlb_mmu_resize_locked(env, i);
         memset(env->tlb_table[i], -1,
                env->tlb_desc[i].size * sizeof(CPUTLBEntry));
         env->tlb_desc[i].used = 0;
@@ -215,6 +250,7 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
         if (test_bit(mmu_idx, &mmu_idx_bitmask)) {
             tlb_debug("%d\n", mmu_idx);
 
+            tlb_mmu_resize_locked(env, mmu_idx);
             memset(env->tlb_table[mmu_idx], -1,
                    env->tlb_desc[mmu_idx].size * sizeof(CPUTLBEntry));
             memset(env->tlb_v_table[mmu_idx], -1, sizeof(env->tlb_v_table[0]));
