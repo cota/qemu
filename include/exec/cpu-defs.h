@@ -67,7 +67,7 @@ typedef uint64_t target_ulong;
 #define CPU_TLB_ENTRY_BITS 5
 #endif
 
-/* TCG_TARGET_TLB_DISPLACEMENT_BITS is used in CPU_TLB_BITS to ensure that
+/* TCG_TARGET_TLB_DISPLACEMENT_BITS is used in MIN_CPU_TLB_BITS to ensure that
  * the TLB is not unnecessarily small, but still small enough for the
  * TLB lookup instruction sequence used by the TCG target.
  *
@@ -89,7 +89,7 @@ typedef uint64_t target_ulong;
  * 0x18 (the offset of the addend field in each TLB entry) plus the offset
  * of tlb_table inside env (which is non-trivial but not huge).
  */
-#define CPU_TLB_BITS                                             \
+#define MIN_CPU_TLB_BITS                                         \
     MIN(8,                                                       \
         TCG_TARGET_TLB_DISPLACEMENT_BITS - CPU_TLB_ENTRY_BITS -  \
         (NB_MMU_MODES <= 1 ? 0 :                                 \
@@ -97,7 +97,7 @@ typedef uint64_t target_ulong;
          NB_MMU_MODES <= 4 ? 2 :                                 \
          NB_MMU_MODES <= 8 ? 3 : 4))
 
-#define CPU_TLB_SIZE (1 << CPU_TLB_BITS)
+#define MIN_CPU_TLB_SIZE (1 << MIN_CPU_TLB_BITS)
 
 typedef struct CPUTLBEntry {
     /* bit TARGET_LONG_BITS to TARGET_PAGE_BITS : virtual address

@@ -82,7 +82,7 @@ void tlb_init(CPUState *cpu)
     for (i = 0; i < NB_MMU_MODES; i++) {
         CPUTLBDesc *desc = &env->tlb_desc[i];
 
-        desc->size = CPU_TLB_SIZE;
+        desc->size = MIN_CPU_TLB_SIZE;
         desc->mask = (desc->size - 1) << CPU_TLB_ENTRY_BITS;
         desc->used = 0;
         env->tlb_table[i] = g_new(CPUTLBEntry, desc->size);
