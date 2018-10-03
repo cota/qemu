@@ -144,6 +144,7 @@ typedef struct CPUIOTLBEntry {
 typedef struct CPUTLBDesc {
     size_t size;
     size_t mask; /* (.size - 1) << CPU_TLB_ENTRY_BITS for TLB fast path */
+    size_t used;
 } CPUTLBDesc;
 
 #define CPU_COMMON_TLB  \
