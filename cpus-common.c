@@ -109,6 +109,7 @@ struct qemu_work_item {
     run_on_cpu_func func;
     run_on_cpu_data data;
     bool free, exclusive, done;
+    bool bql;
 };
 
 /* Called with the CPU's work_mutex held */
@@ -145,6 +146,7 @@ void run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
     wi.done = false;
     wi.free = false;
     wi.exclusive = false;
+    wi.bql = true;
 
     qemu_mutex_lock(&cpu->work_mutex);
     queue_work_on_cpu_locked(cpu, &wi);
@@ -167,6 +169,21 @@ void async_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
     wi->func = func;
     wi->data = data;
     wi->free = true;
+    wi->bql = true;
+
+    queue_work_on_cpu(cpu, wi);
+}
+
+void async_run_on_cpu_no_bql(CPUState *cpu, run_on_cpu_func func,
+                             run_on_cpu_data data)
+{
+    struct qemu_work_item *wi;
+
+    wi = g_malloc0(sizeof(struct qemu_work_item));
+    wi->func = func;
+    wi->data = data;
+    wi->free = true;
+    /* wi->bql initialized to false */
 
     queue_work_on_cpu(cpu, wi);
 }
@@ -311,6 +328,7 @@ void async_safe_run_on_cpu(CPUState *cpu, run_on_cpu_func func,
     wi->data = data;
     wi->free = true;
     wi->exclusive = true;
+    /* wi->bql initialized to false */
 
     queue_work_on_cpu(cpu, wi);
 }
@@ -319,7 +337,10 @@ void process_queued_cpu_work(CPUState *cpu)
 {
     struct qemu_work_item *wi;
     bool send_broadcast = false;
-    bool has_bql = qemu_mutex_iothread_locked();
+
+    g_assert(qemu_mutex_iothread_locked());
+    /* Only acquire the BQL for jobs that require it */
+    qemu_mutex_unlock_iothread();
 
     qemu_mutex_lock(&cpu->work_mutex);
     while (!QSIMPLEQ_EMPTY(&cpu->work_list)) {
@@ -328,28 +349,23 @@ void process_queued_cpu_work(CPUState *cpu)
         QSIMPLEQ_REMOVE_HEAD(&cpu->work_list, node);
         qemu_mutex_unlock(&cpu->work_mutex);
         if (wi->exclusive) {
+            g_assert(!wi->bql);
             /* Running work items outside the BQL avoids the following deadlock:
              * 1) start_exclusive() is called with the BQL taken while another
              * CPU is running; 2) cpu_exec in the other CPU tries to takes the
              * BQL, so it goes to sleep; start_exclusive() is sleeping too, so
              * neither CPU can proceed.
              */
-            if (has_bql) {
-                qemu_mutex_unlock_iothread();
-            }
             start_exclusive();
             wi->func(cpu, wi->data);
             end_exclusive();
-            if (has_bql) {
-                qemu_mutex_lock_iothread();
-            }
         } else {
-            if (has_bql) {
-                wi->func(cpu, wi->data);
-            } else {
+            if (wi->bql) {
                 qemu_mutex_lock_iothread();
                 wi->func(cpu, wi->data);
                 qemu_mutex_unlock_iothread();
+            } else {
+                wi->func(cpu, wi->data);
             }
         }
         qemu_mutex_lock(&cpu->work_mutex);
@@ -363,4 +379,6 @@ void process_queued_cpu_work(CPUState *cpu)
         qemu_cond_broadcast(&cpu->work_cond);
     }
     qemu_mutex_unlock(&cpu->work_mutex);
+
+    qemu_mutex_lock_iothread();
 }
