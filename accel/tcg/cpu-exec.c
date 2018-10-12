@@ -435,9 +435,12 @@ static inline bool cpu_handle_halt(CPUState *cpu)
             qemu_mutex_unlock_iothread();
         }
 #endif
+        qemu_mutex_lock_iothread();
         if (!cpu_has_work(cpu)) {
+            qemu_mutex_unlock_iothread();
             return true;
         }
+        qemu_mutex_unlock_iothread();
 
         cpu->halted = 0;
     }
