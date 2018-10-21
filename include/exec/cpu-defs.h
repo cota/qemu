@@ -178,6 +178,14 @@ typedef struct CPUTLBDesc {
     CPUIOTLBEntry iotlb[NB_MMU_MODES][CPU_TLB_SIZE];
 #endif /* TCG_TARGET_IMPLEMENTS_DYN_TLB */
 
+#ifdef CONFIG_PLUGIN
+# define CPU_PLUGIN_HOSTADDR                            \
+    /* stores the host address of a guest access */     \
+    void *hostaddr;
+#else
+# define CPU_PLUGIN_HOSTADDR
+#endif
+
 #define CPU_COMMON_TLB                                                  \
     /* The meaning of the MMU modes is defined in the target code. */   \
     /* tlb_lock serializes updates to tlb_table and tlb_v_table */      \
@@ -186,6 +194,7 @@ typedef struct CPUTLBDesc {
     CPUTLBEntry tlb_v_table[NB_MMU_MODES][CPU_VTLB_SIZE];               \
     CPU_IOTLB                                                           \
     CPUIOTLBEntry iotlb_v[NB_MMU_MODES][CPU_VTLB_SIZE];                 \
+    CPU_PLUGIN_HOSTADDR                                                 \
     size_t tlb_flush_count;                                             \
     target_ulong tlb_flush_addr;                                        \
     target_ulong tlb_flush_mask;                                        \
