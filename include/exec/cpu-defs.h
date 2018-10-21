@@ -186,6 +186,8 @@ typedef struct CPUTLBDesc {
     CPUTLBEntry tlb_v_table[NB_MMU_MODES][CPU_VTLB_SIZE];               \
     CPU_IOTLB                                                           \
     CPUIOTLBEntry iotlb_v[NB_MMU_MODES][CPU_VTLB_SIZE];                 \
+    /* stores the host address of a guest access, if needed for plugins */ \
+    void *hostaddr;                                                     \
     size_t tlb_flush_count;                                             \
     target_ulong tlb_flush_addr;                                        \
     target_ulong tlb_flush_mask;                                        \
