@@ -12787,7 +12787,8 @@ static void arm_post_translate_insn(DisasContext *dc)
     translator_loop_temp_check(&dc->base);
 }
 
-static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
+                                  struct qemu_plugin_insn *plugin_insn)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
     CPUARMState *env = cpu->env_ptr;
@@ -12854,7 +12855,8 @@ static bool thumb_insn_is_unconditional(DisasContext *s, uint32_t insn)
     return false;
 }
 
-static void thumb_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+static void thumb_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu,
+                                    struct qemu_plugin_insn *plugin_insn)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
     CPUARMState *env = cpu->env_ptr;
