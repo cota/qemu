@@ -33,6 +33,7 @@
 #include "exec/helper-proto.h"
 #include "qemu/atomic.h"
 #include "qemu/atomic128.h"
+#include "exec/tb-hash-xx.h"
 
 /* DEBUG defines, enable DEBUG_TLB_LOG to log to the CPU_LOG_MMU target */
 /* #define DEBUG_TLB */
@@ -74,11 +75,27 @@ QEMU_BUILD_BUG_ON(sizeof(target_ulong) > sizeof(run_on_cpu_data));
 QEMU_BUILD_BUG_ON(NB_MMU_MODES > 16);
 #define ALL_MMUIDX_BITS ((1 << NB_MMU_MODES) - 1)
 
+static guint code_ht_hash(gconstpointer ap)
+{
+    const target_ulong *a = ap;
+
+    return tb_hash_func7(*a, 0, 0, 0, 0);
+}
+
+static gboolean code_ht_equal(gconstpointer ap, gconstpointer bp)
+{
+    const target_ulong *a = ap;
+    const target_ulong *b = bp;
+
+    return *a == *b;
+}
+
 void tlb_init(CPUState *cpu)
 {
     CPUArchState *env = cpu->env_ptr;
 
     qemu_spin_init(&env->tlb_c.lock);
+    env->tlb_c.code_ht = g_hash_table_new(code_ht_hash, code_ht_equal);
 
     /* Ensure that cpu_reset performs a full flush.  */
     env->tlb_c.dirty = ALL_MMUIDX_BITS;
@@ -150,6 +167,10 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
         int mmu_idx = ctz32(work);
         tlb_flush_one_mmuidx_locked(env, mmu_idx);
     }
+
+    /* reset the code HT. Destroy decrements the ref, so bump it first */
+    g_hash_table_ref(env->tlb_c.code_ht);
+    g_hash_table_destroy(env->tlb_c.code_ht);
 
     qemu_spin_unlock(&env->tlb_c.lock);
 
@@ -289,6 +310,7 @@ static void tlb_flush_page_by_mmuidx_async_work(CPUState *cpu,
             tlb_flush_page_locked(env, mmu_idx, addr);
         }
     }
+    g_hash_table_remove(env->tlb_c.code_ht, &addr);
     qemu_spin_unlock(&env->tlb_c.lock);
 
     tb_flush_jmp_cache(cpu, addr);
@@ -385,11 +407,15 @@ void tlb_flush_page_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
                 flush = true;
                 break;
             }
+
+            /* check whether the CPU might have read code from this page */
+            if (g_hash_table_contains(env->tlb_c.code_ht, &addr)) {
+                flush = true;
+                break;
+            }
             /*
              * The victim TLB is only read in the slow path with the TLB
              * lock held, so we can clear it now.
-             * Note that there cannot be any victim TLB references from the
-             * jmp cache, so we do not have to clear it.
              */
             tlb_flush_vtlb_page_locked(env, midx, addr);
         }
@@ -644,9 +670,6 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
         /* Evict the old entry into the victim tlb.  */
         copy_tlb_helper_locked(tv, te);
         env->iotlb_v[mmu_idx][vidx] = env->iotlb[mmu_idx][index];
-
-        /* The jmp cache cannot keep references to pages in the victim TLB */
-        cpu_tb_jmp_cache_clear(cpu);
     }
 
     /* refill the tlb */
@@ -698,6 +721,9 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
     }
 
     copy_tlb_helper_locked(te, &tn);
+    if (prot & PAGE_EXEC) {
+        g_hash_table_add(env->tlb_c.code_ht, &te->addr_code);
+    }
     qemu_spin_unlock(&env->tlb_c.lock);
 }
 

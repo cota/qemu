@@ -167,6 +167,12 @@ typedef struct CPUTLBCommon {
      */
     uint16_t dirty;
     /*
+     * Hash table to track code pages that might have been read by
+     * the CPU. This is used to avoid unnecessary flushes.
+     * Protected by tlb_c.lock so that other vCPUs can query it.
+     */
+    GHashTable *code_ht;
+    /*
      * Statistics.  These are not lock protected, but are read and
      * written atomically.  This allows the monitor to print a snapshot
      * of the stats without interfering with the cpu.
