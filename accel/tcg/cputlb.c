@@ -239,7 +239,6 @@ static inline void tlb_flush_vtlb_page_locked(CPUArchState *env, int mmu_idx,
 {
     int k;
 
-    assert_cpu_is_self(ENV_GET_CPU(env));
     for (k = 0; k < CPU_VTLB_SIZE; k++) {
         tlb_flush_entry_locked(&env->tlb_v_table[mmu_idx][k], page);
     }
@@ -346,14 +345,57 @@ void tlb_flush_page_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
 {
     const run_on_cpu_func fn = tlb_flush_page_by_mmuidx_async_work;
     target_ulong addr_and_mmu_idx;
+    unsigned long mmu_idx_bitmap = idxmap;
+    CPUState *cpu;
+    int midx;
 
     tlb_debug("addr: "TARGET_FMT_lx" mmu_idx:%"PRIx16"\n", addr, idxmap);
 
     /* This should already be page aligned */
-    addr_and_mmu_idx = addr & TARGET_PAGE_MASK;
+    addr &= TARGET_PAGE_MASK;
+    addr_and_mmu_idx = addr;
     addr_and_mmu_idx |= idxmap;
 
-    flush_all_helper(src_cpu, fn, RUN_ON_CPU_TARGET_PTR(addr_and_mmu_idx));
+    CPU_FOREACH(cpu) {
+        CPUArchState *env = cpu->env_ptr;
+        bool flush = false;
+        if (cpu == src_cpu) {
+            continue;
+        }
+        /* check whether we have to send the flush */
+        qemu_spin_lock(&env->tlb_c.lock);
+        for (midx = 0; midx < NB_MMU_MODES; midx++) {
+            target_ulong lp_addr = env->tlb_d[midx].large_page_addr;
+            target_ulong lp_mask = env->tlb_d[midx].large_page_mask;
+
+            if (!test_bit(midx, &mmu_idx_bitmap)) {
+                continue;
+            }
+
+
+            if ((addr & lp_mask) == lp_addr) {
+                flush = true;
+                break;
+            } else {
+                CPUTLBEntry *entry = tlb_entry(env, midx, addr);
+                if (tlb_hit_page_anyprot(entry, addr)) {
+                    flush = true;
+                    break;
+                }
+            }
+            /*
+             * The victim cache is only read in the slow path with the TLB
+             * lock held, so we can clear it now.
+             * Note that there cannot be any victim TLB references from the
+             * jmp cache, so we do not have to clear it.
+             */
+            tlb_flush_vtlb_page_locked(env, midx, addr);
+        }
+        qemu_spin_unlock(&env->tlb_c.lock);
+        if (unlikely(flush)) {
+            async_run_on_cpu(cpu, fn, RUN_ON_CPU_TARGET_PTR(addr_and_mmu_idx));
+        }
+    }
     async_safe_run_on_cpu(src_cpu, fn, RUN_ON_CPU_TARGET_PTR(addr_and_mmu_idx));
 }
 
