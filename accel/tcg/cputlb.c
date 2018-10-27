@@ -258,8 +258,9 @@ static void tlb_flush_page_locked(CPUArchState *env, int midx,
                   midx, lp_addr, lp_mask);
         tlb_flush_one_mmuidx_locked(env, midx);
     } else {
-        int pidx = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
-        tlb_flush_entry_locked(&env->tlb_table[midx][pidx], addr);
+        CPUTLBEntry *entry = tlb_entry(env, midx, addr);
+
+        tlb_flush_entry_locked(entry, addr);
         tlb_flush_vtlb_page_locked(env, midx, addr);
     }
 }
