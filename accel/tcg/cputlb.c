@@ -365,26 +365,28 @@ void tlb_flush_page_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
         /* check whether we have to send the flush */
         qemu_spin_lock(&env->tlb_c.lock);
         for (midx = 0; midx < NB_MMU_MODES; midx++) {
-            target_ulong lp_addr = env->tlb_d[midx].large_page_addr;
-            target_ulong lp_mask = env->tlb_d[midx].large_page_mask;
+            target_ulong lp_addr;
+            target_ulong lp_mask;
+            CPUTLBEntry *entry;
 
             if (!test_bit(midx, &mmu_idx_bitmap)) {
                 continue;
             }
 
-
+            lp_addr = env->tlb_d[midx].large_page_addr;
+            lp_mask = env->tlb_d[midx].large_page_mask;
             if ((addr & lp_mask) == lp_addr) {
                 flush = true;
                 break;
-            } else {
-                CPUTLBEntry *entry = tlb_entry(env, midx, addr);
-                if (tlb_hit_page_anyprot(entry, addr)) {
-                    flush = true;
-                    break;
-                }
+            }
+
+            entry = tlb_entry(env, midx, addr);
+            if (tlb_hit_page_anyprot(entry, addr)) {
+                flush = true;
+                break;
             }
             /*
-             * The victim cache is only read in the slow path with the TLB
+             * The victim TLB is only read in the slow path with the TLB
              * lock held, so we can clear it now.
              * Note that there cannot be any victim TLB references from the
              * jmp cache, so we do not have to clear it.
@@ -642,6 +644,9 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
         /* Evict the old entry into the victim tlb.  */
         copy_tlb_helper_locked(tv, te);
         env->iotlb_v[mmu_idx][vidx] = env->iotlb[mmu_idx][index];
+
+        /* The jmp cache cannot keep references to pages in the victim TLB */
+        cpu_tb_jmp_cache_clear(cpu);
     }
 
     /* refill the tlb */
