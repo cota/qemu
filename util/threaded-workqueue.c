@@ -64,7 +64,7 @@ struct ThreadLocal {
 
     /* the event used to wake up the thread */
     QemuEvent ev;
-};
+} QEMU_ALIGNED(SMP_CACHE_BYTES);
 typedef struct ThreadLocal ThreadLocal;
 
 /*
@@ -112,8 +112,9 @@ struct Threads {
 
     ThreadedWorkqueueOps *ops;
 
-    const char *name;
-    QemuEvent ev;
+    struct {
+        QemuEvent ev;
+    } QEMU_ALIGNED(SMP_CACHE_BYTES);
 
     ThreadLocal per_thread_data[0];
 };
@@ -292,8 +293,8 @@ static void uninit_requests(Threads *threads, int free_nr)
     }
 
     g_free(threads->result_bitmap);
-    g_free(threads->request_fill_bitmap);
-    g_free(threads->request_done_bitmap);
+    qemu_vfree(threads->request_fill_bitmap);
+    qemu_vfree(threads->request_done_bitmap);
     g_free(threads->requests);
 }
 
@@ -303,8 +304,8 @@ static int init_requests(Threads *threads)
     int aligned_requests, free_nr = 0, ret = -1;
 
     aligned_requests = BITS_ALIGNED_TO_CACHE(threads->total_requests);
-    threads->request_fill_bitmap = bitmap_new(aligned_requests);
-    threads->request_done_bitmap = bitmap_new(aligned_requests);
+    threads->request_fill_bitmap = bitmap_new_aligned(aligned_requests, SMP_CACHE_BYTES);
+    threads->request_done_bitmap = bitmap_new_aligned(aligned_requests, SMP_CACHE_BYTES);
     threads->result_bitmap = bitmap_new(threads->total_requests);
 
     QEMU_BUILD_BUG_ON(!QEMU_IS_ALIGNED(sizeof(ThreadRequest), sizeof(long)));
@@ -350,7 +351,7 @@ static void uninit_thread_data(Threads *threads)
     }
 }
 
-static void init_thread_data(Threads *threads)
+static void init_thread_data(Threads *threads, const char *th_name)
 {
     ThreadLocal *thread_local = threads->per_thread_data;
     char *name;
@@ -369,7 +370,7 @@ static void init_thread_data(Threads *threads)
 
         qemu_event_init(&thread_local[i].ev, false);
 
-        name = g_strdup_printf("%s/%d", threads->name, thread_local[i].self);
+        name = g_strdup_printf("%s/%d", th_name, thread_local[i].self);
         qemu_thread_create(&thread_local[i].thread, name,
                            thread_run, &thread_local[i], QEMU_THREAD_JOINABLE);
         g_free(name);
@@ -381,8 +382,8 @@ Threads *threaded_workqueue_create(const char *name, unsigned int threads_nr,
 {
     Threads *threads;
 
-    threads = g_malloc0(sizeof(*threads) + threads_nr * sizeof(ThreadLocal));
-    threads->name = name;
+    threads = qemu_memalign(SMP_CACHE_BYTES, sizeof(*threads) + threads_nr * sizeof(ThreadLocal));
+    memset(threads, 0, sizeof(*threads) + threads_nr * sizeof(ThreadLocal));
     threads->ops = ops;
 
     threads->threads_nr = threads_nr;
@@ -390,12 +391,12 @@ Threads *threaded_workqueue_create(const char *name, unsigned int threads_nr,
 
     threads->total_requests = thread_request_nr * threads_nr;
     if (init_requests(threads) < 0) {
-        g_free(threads);
+        qemu_vfree(threads);
         return NULL;
     }
 
     qemu_event_init(&threads->ev, false);
-    init_thread_data(threads);
+    init_thread_data(threads, name);
     return threads;
 }
 
@@ -404,7 +405,7 @@ void threaded_workqueue_destroy(Threads *threads)
     uninit_thread_data(threads);
     uninit_requests(threads, threads->total_requests);
     qemu_event_destroy(&threads->ev);
-    g_free(threads);
+    qemu_vfree(threads);
 }
 
 static void request_done(Threads *threads, ThreadRequest *request)

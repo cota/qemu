@@ -101,6 +101,14 @@ static inline unsigned long *bitmap_new(long nbits)
     return ptr;
 }
 
+/* free with qemu_vfree */
+static inline unsigned long *bitmap_new_aligned(long nbits, size_t alignment)
+{
+    size_t len = BITS_TO_LONGS(nbits) * sizeof(unsigned long);
+
+    return qemu_memalign(alignment, len);
+}
+
 static inline void bitmap_zero(unsigned long *dst, long nbits)
 {
     if (small_nbits(nbits)) {
