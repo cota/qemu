@@ -254,5 +254,8 @@ int main(int argc, char *argv[])
     threads = compress_threads_save_setup(threads_nr, requests_nr);
     run(threads, mem, mem_size, repeated_count);
     compress_threads_save_cleanup(threads);
+
+    /* please ASan */
+    qemu_vfree(mem);
     return 0;
 }
