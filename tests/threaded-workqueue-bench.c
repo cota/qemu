@@ -183,7 +183,9 @@ static void run(Threads *threads, uint8_t *mem, unsigned long mem_size,
                comp_stats.pages, spend, rate);
     }
 
-    printf("AVG: Time Cost %ld.\n", total_ts / repeated_count);
+    printf("AVG: Time Cost %ld\n", total_ts / repeated_count);
+    printf("AVG Throughput: %f GB/s\n",
+           (double)(mem_size >> 30) * repeated_count * 1e6 / total_ts);
 }
 
 static void usage(const char *arg0)
