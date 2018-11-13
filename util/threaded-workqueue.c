@@ -111,12 +111,11 @@ struct Threads {
     unsigned int current_thread_index;
 
     ThreadedWorkqueueOps *ops;
+    ThreadLocal *per_thread_data;
 
     struct {
         QemuEvent ev;
     } QEMU_ALIGNED(SMP_CACHE_BYTES);
-
-    ThreadLocal per_thread_data[0];
 };
 typedef struct Threads Threads;
 
@@ -349,13 +348,19 @@ static void uninit_thread_data(Threads *threads)
         qemu_event_destroy(&thread_local[i].ev);
         g_free(thread_local[i].result_bitmap);
     }
+    qemu_vfree(thread_local);
 }
 
 static void init_thread_data(Threads *threads, const char *th_name)
 {
-    ThreadLocal *thread_local = threads->per_thread_data;
+    ThreadLocal *thread_local;
     char *name;
     int start_index, end_index, i;
+
+    thread_local = qemu_memalign(SMP_CACHE_BYTES,
+                                 sizeof(*thread_local) * threads->threads_nr);
+    memset(thread_local, 0, sizeof(*thread_local) * threads->threads_nr);
+    threads->per_thread_data = thread_local;
 
     for (i = 0; i < threads->threads_nr; i++) {
         thread_local[i].threads = threads;
@@ -382,8 +387,8 @@ Threads *threaded_workqueue_create(const char *name, unsigned int threads_nr,
 {
     Threads *threads;
 
-    threads = qemu_memalign(SMP_CACHE_BYTES, sizeof(*threads) + threads_nr * sizeof(ThreadLocal));
-    memset(threads, 0, sizeof(*threads) + threads_nr * sizeof(ThreadLocal));
+    threads = qemu_memalign(SMP_CACHE_BYTES, sizeof(*threads));
+    memset(threads, 0, sizeof(*threads));
     threads->ops = ops;
 
     threads->threads_nr = threads_nr;
