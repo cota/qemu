@@ -428,7 +428,7 @@ void threaded_workqueue_submit_request(Threads *threads, void *request)
 
     mark_request_valid(&threads->per_thread_data[req->th_idx], request_index);
 
-    threads->current_thread_index = (req->th_idx + 1) % threads->threads_nr;
+    threads->current_thread_index = req->th_idx;
     qemu_event_set(&thread_local->ev);
 }
 
