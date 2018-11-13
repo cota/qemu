@@ -30,11 +30,8 @@ struct ThreadRequest {
      * to fetch result out.
      */
     bool done;
-    /*
-     * the index to Threads::requests.
-     * Save it to the padding space although it can be calculated at runtime.
-     */
-    int index;
+    bool inited;
+    int th_idx;
 };
 typedef struct ThreadRequest ThreadRequest;
 
@@ -42,28 +39,39 @@ struct ThreadLocal {
     struct Threads *threads;
 
     /*
-     * the request region in Threads::requests that the thread
-     * need handle
-     */
-    int start_request_index;
-    int end_request_index;
-
-    /*
      * the interim bitmap used by the thread to avoid frequent
      * memory allocation
      */
     unsigned long *result_bitmap;
 
-    /* the index of the thread */
-    int self;
+    void *requests;
+
+    /*
+     * the bit in these two bitmaps indicates the index of the requests
+     * respectively. If it's the same, the corresponding request is free
+     * and owned by the user, i.e, where the user fills a request. Otherwise,
+     * it is valid and owned by the thread, i.e, where the thread fetches
+     * the request and write the result.
+     */
+
+    /* after the user fills the request, the bit is flipped. */
+    unsigned long *request_bm;
+    /* after handles the request, the thread flips the bit. */
+    unsigned long *done_bm;
+
+    QemuThread thread;
 
     /* thread is useless and needs to exit */
     bool quit;
 
-    QemuThread thread;
-
     /* the event used to wake up the thread */
-    QemuEvent ev;
+    struct {
+        QemuEvent ev;
+    } QEMU_ALIGNED(SMP_CACHE_BYTES);
+
+    struct {
+        QemuEvent completion_ev;
+    } QEMU_ALIGNED(SMP_CACHE_BYTES);
 } QEMU_ALIGNED(SMP_CACHE_BYTES);
 typedef struct ThreadLocal ThreadLocal;
 
@@ -72,25 +80,6 @@ typedef struct ThreadLocal ThreadLocal;
  * all threads
  */
 struct Threads {
-    /*
-     * in order to avoid contention, the @requests is partitioned to
-     * @threads_nr pieces, each thread exclusively handles
-     * @thread_request_nr requests in the array.
-     */
-    void *requests;
-
-    /*
-     * the bit in these two bitmaps indicates the index of the ＠requests
-     * respectively. If it's the same, the corresponding request is free
-     * and owned by the user, i.e, where the user fills a request. Otherwise,
-     * it is valid and owned by the thread, i.e, where the thread fetches
-     * the request and write the result.
-     */
-
-    /* after the user fills the request, the bit is flipped. */
-    unsigned long *request_fill_bitmap;
-    /* after handles the request, the thread flips the bit. */
-    unsigned long *request_done_bitmap;
 
     /*
      * the interim bitmap used by the user to avoid frequent
@@ -103,7 +92,6 @@ struct Threads {
 
     /* the number of requests that each thread need handle */
     unsigned int thread_request_nr;
-    unsigned int total_requests;
 
     unsigned int threads_nr;
 
@@ -112,37 +100,21 @@ struct Threads {
 
     ThreadedWorkqueueOps *ops;
     ThreadLocal *per_thread_data;
-
-    struct {
-        QemuEvent ev;
-    } QEMU_ALIGNED(SMP_CACHE_BYTES);
 };
 typedef struct Threads Threads;
 
-static ThreadRequest *index_to_request(Threads *threads, int request_index)
+static inline ThreadRequest *choose_req(Threads *threads, ThreadLocal *th, int idx)
 {
-    ThreadRequest *request;
+    void *req = th->requests;
 
-    request = threads->requests + request_index * threads->request_size;
-
-    assert(request->index == request_index);
-    return request;
+    return req + idx * threads->request_size;
 }
 
-static int request_to_index(ThreadRequest *request)
+static int request_to_index(Threads *threads, ThreadRequest *req)
 {
-    return request->index;
-}
-
-static int thread_to_first_request_index(Threads *threads, int thread_id)
-{
-    thread_id %= threads->threads_nr;
-    return thread_id * threads->thread_request_nr;
-}
-
-static int request_index_to_thread(Threads *threads, int request_index)
-{
-    return request_index / threads->thread_request_nr;
+    void *addr0 = threads->per_thread_data[req->th_idx].requests;
+    void *addr = req;
+    return (addr - addr0) / threads->request_size;
 }
 
 /*
@@ -152,10 +124,12 @@ static int request_index_to_thread(Threads *threads, int request_index)
  * valid request: the request contains the request data and it's commited
  *   to the thread, i,e. it's owned by thread.
  */
-static unsigned long *get_free_request_bitmap(Threads *threads)
+static unsigned long *get_free_request_bitmap(Threads *threads, int th_idx)
 {
-    bitmap_xor(threads->result_bitmap, threads->request_fill_bitmap,
-               threads->request_done_bitmap, threads->total_requests);
+    ThreadLocal *th = &threads->per_thread_data[th_idx];
+
+    bitmap_xor(threads->result_bitmap, th->request_bm, th->done_bm,
+               threads->thread_request_nr);
 
     /*
      * paired with smp_wmb() in mark_request_free() to make sure that we
@@ -166,31 +140,23 @@ static unsigned long *get_free_request_bitmap(Threads *threads)
     return threads->result_bitmap;
 }
 
-static int find_free_request_index(Threads *threads)
+static ThreadRequest *find_free_request(Threads *threads)
 {
-    unsigned long *result_bitmap = get_free_request_bitmap(threads);
-    int index, cur_index;
+    int i;
 
-    cur_index = thread_to_first_request_index(threads,
-                                              threads->current_thread_index);
+    for (i = 0; i < threads->threads_nr; i++) {
+        int j = (threads->current_thread_index + i) % threads->threads_nr;
+        unsigned long *bm = get_free_request_bitmap(threads, j);
+        int index = find_next_zero_bit(bm, threads->thread_request_nr, 0);
 
-retry:
-    index = find_next_zero_bit(result_bitmap, threads->total_requests,
-                               cur_index);
-    if (index < threads->total_requests) {
-        return index;
+        if (index < threads->thread_request_nr) {
+            return choose_req(threads, &threads->per_thread_data[j], index);
+        }
     }
-
-    /* if we get nothing, start it over. */
-    if (cur_index != 0) {
-        cur_index = 0;
-        goto retry;
-    }
-
-    return -1;
+    return NULL;
 }
 
-static void mark_request_valid(Threads *threads, int request_index)
+static void mark_request_valid(ThreadLocal *th, int request_index)
 {
     /*
      * paired with smp_rmb() in find_first_valid_request_index() to make
@@ -199,7 +165,7 @@ static void mark_request_valid(Threads *threads, int request_index)
      */
     smp_wmb();
 
-    change_bit(request_index, threads->request_fill_bitmap);
+    change_bit(request_index, th->request_bm);
 }
 
 static int thread_find_first_valid_request_index(ThreadLocal *thread)
@@ -207,45 +173,41 @@ static int thread_find_first_valid_request_index(ThreadLocal *thread)
     Threads *threads = thread->threads;
     int index;
 
-    bitmap_xor(thread->result_bitmap, threads->request_fill_bitmap,
-               threads->request_done_bitmap, threads->total_requests);
+    bitmap_xor(thread->result_bitmap, thread->request_bm,
+               thread->done_bm, threads->thread_request_nr);
     /*
      * paired with smp_wmb() in mark_request_valid() to make sure that
      * we read request_fill_bitmap before fetch the request out.
      */
     smp_rmb();
 
-    index = find_next_bit(thread->result_bitmap, threads->total_requests,
-                          thread->start_request_index);
-    return index > thread->end_request_index ? -1 : index;
+    index = find_next_bit(thread->result_bitmap, threads->thread_request_nr, 0);
+    return index < threads->thread_request_nr ? index : -1;
 }
 
 static void mark_request_free(ThreadLocal *thread, ThreadRequest *request)
 {
-    int index = request_to_index(request);
+    int index = request_to_index(thread->threads, request);
 
     /*
      * smp_wmb() is implied in change_bit_atomic() that is paired with
      * smp_rmb() in get_free_request_bitmap() to make sure the result
      * has been saved before the bit is flipped.
      */
-    change_bit_atomic(index, thread->threads->request_done_bitmap);
+    change_bit_atomic(index, thread->done_bm);
 }
 
 /* retry to see if there is available request before actually go to wait. */
 #define BUSY_WAIT_COUNT 1000
 
-static ThreadRequest *
-thread_busy_wait_for_request(ThreadLocal *thread)
+static ThreadRequest *thread_busy_wait_for_request(ThreadLocal *thread)
 {
     int index, count = 0;
 
     for (count = 0; count < BUSY_WAIT_COUNT; count++) {
         index = thread_find_first_valid_request_index(thread);
         if (index >= 0) {
-            assert(index >= thread->start_request_index &&
-                   index <= thread->end_request_index);
-            return index_to_request(thread->threads, index);
+            return choose_req(thread->threads, thread, index);
         }
 
         cpu_relax();
@@ -261,7 +223,7 @@ static void *thread_run(void *opaque)
     void (*handler)(void *request) = threads->ops->thread_request_handler;
     ThreadRequest *request;
 
-    for ( ; !atomic_read(&self_data->quit); ) {
+    while (!atomic_read(&self_data->quit)) {
         qemu_event_reset(&self_data->ev);
 
         request = thread_busy_wait_for_request(self_data);
@@ -275,64 +237,91 @@ static void *thread_run(void *opaque)
         handler(request + 1);
         request->done = true;
         mark_request_free(self_data, request);
-        qemu_event_set(&threads->ev);
+        qemu_event_set(&self_data->completion_ev);
     }
 
     return NULL;
 }
 
-static void uninit_requests(Threads *threads, int free_nr)
+static void uninit_requests(Threads *threads)
 {
-    ThreadRequest *request;
-    int i;
+    int i, j;
 
-    for (request = threads->requests, i = 0; i < free_nr; i++) {
-        threads->ops->thread_request_uninit(request + 1);
-        request = (void *)request + threads->request_size;
+    for (i = 0; i < threads->threads_nr; i++) {
+        ThreadLocal *th = &threads->per_thread_data[i];
+
+        for (j = 0; j < threads->thread_request_nr; j++) {
+            ThreadRequest *req = choose_req(threads, th, j);
+
+            if (!req->inited) {
+                /* reqs are inited in order, so it's safe to stop here */
+                goto reqs_done;
+            }
+            threads->ops->thread_request_uninit(req + 1);
+        }
+    }
+
+ reqs_done:
+    for (i = 0; i < threads->threads_nr; i++) {
+        ThreadLocal *th = &threads->per_thread_data[i];
+
+        qemu_vfree(th->request_bm);
+        qemu_vfree(th->done_bm);
+        qemu_vfree(th->requests);
     }
 
     g_free(threads->result_bitmap);
-    qemu_vfree(threads->request_fill_bitmap);
-    qemu_vfree(threads->request_done_bitmap);
-    g_free(threads->requests);
+}
+
+static void th_reqs_init(Threads *threads, int th_idx)
+{
+    ThreadLocal *th = &threads->per_thread_data[th_idx];
+    size_t n = threads->thread_request_nr;
+    /* fill up the cache line to prevent false sharing */
+    size_t n_full = BITS_ALIGNED_TO_CACHE(n);
+
+    th->request_bm = bitmap_new_aligned(n_full, SMP_CACHE_BYTES);
+    th->done_bm = bitmap_new_aligned(n_full, SMP_CACHE_BYTES);
+
+    th->requests = qemu_memalign(SMP_CACHE_BYTES, n * threads->request_size);
+    memset(th->requests, 0, n * threads->request_size);
 }
 
 static int init_requests(Threads *threads)
 {
-    ThreadRequest *request;
-    int aligned_requests, free_nr = 0, ret = -1;
+    int ret;
+    int i, j;
 
-    aligned_requests = BITS_ALIGNED_TO_CACHE(threads->total_requests);
-    threads->request_fill_bitmap = bitmap_new_aligned(aligned_requests, SMP_CACHE_BYTES);
-    threads->request_done_bitmap = bitmap_new_aligned(aligned_requests, SMP_CACHE_BYTES);
-    threads->result_bitmap = bitmap_new(threads->total_requests);
-
+    threads->result_bitmap = bitmap_new(threads->thread_request_nr);
     QEMU_BUILD_BUG_ON(!QEMU_IS_ALIGNED(sizeof(ThreadRequest), sizeof(long)));
 
     threads->request_size = threads->ops->thread_get_request_size();
     threads->request_size = QEMU_ALIGN_UP(threads->request_size, sizeof(long));
     threads->request_size += sizeof(ThreadRequest);
-    threads->requests = g_try_malloc0_n(threads->total_requests,
-                                        threads->request_size);
-    if (!threads->requests) {
-        goto exit;
+
+    for (i = 0; i < threads->threads_nr; i++) {
+        th_reqs_init(threads, i);
     }
 
-    for (request = threads->requests; free_nr < threads->total_requests;
-        free_nr++) {
-        ret = threads->ops->thread_request_init(request + 1);
-        if (ret < 0) {
-            goto exit;
-        }
+    for (i = 0; i < threads->threads_nr; i++) {
+        ThreadLocal *th = &threads->per_thread_data[i];
 
-        request->index = free_nr;
-        request = (void *)request + threads->request_size;
+        for (j = 0; j < threads->thread_request_nr; j++) {
+            ThreadRequest *req = choose_req(threads, th, j);
+
+            ret = threads->ops->thread_request_init(req + 1);
+            if (ret) {
+                goto exit;
+            }
+            req->th_idx = i;
+            req->inited = true;
+        }
     }
 
     return 0;
 
 exit:
-    uninit_requests(threads, free_nr);
+    uninit_requests(threads);
     return ret;
 }
 
@@ -342,40 +331,30 @@ static void uninit_thread_data(Threads *threads)
     int i;
 
     for (i = 0; i < threads->threads_nr; i++) {
-        thread_local[i].quit = true;
+        atomic_set(&thread_local[i].quit, true);
         qemu_event_set(&thread_local[i].ev);
         qemu_thread_join(&thread_local[i].thread);
         qemu_event_destroy(&thread_local[i].ev);
+        qemu_event_destroy(&thread_local[i].completion_ev);
         g_free(thread_local[i].result_bitmap);
     }
-    qemu_vfree(thread_local);
 }
 
 static void init_thread_data(Threads *threads, const char *th_name)
 {
-    ThreadLocal *thread_local;
+    ThreadLocal *thread_local = threads->per_thread_data;
     char *name;
-    int start_index, end_index, i;
-
-    thread_local = qemu_memalign(SMP_CACHE_BYTES,
-                                 sizeof(*thread_local) * threads->threads_nr);
-    memset(thread_local, 0, sizeof(*thread_local) * threads->threads_nr);
-    threads->per_thread_data = thread_local;
+    int i;
 
     for (i = 0; i < threads->threads_nr; i++) {
         thread_local[i].threads = threads;
-        thread_local[i].self = i;
 
-        start_index = thread_to_first_request_index(threads, i);
-        end_index = start_index + threads->thread_request_nr - 1;
-        thread_local[i].start_request_index = start_index;
-        thread_local[i].end_request_index = end_index;
-
-        thread_local[i].result_bitmap = bitmap_new(threads->total_requests);
+        thread_local[i].result_bitmap = bitmap_new(threads->thread_request_nr);
 
         qemu_event_init(&thread_local[i].ev, false);
+        qemu_event_init(&thread_local[i].completion_ev, false);
 
-        name = g_strdup_printf("%s/%d", th_name, thread_local[i].self);
+        name = g_strdup_printf("%s/%d", th_name, i);
         qemu_thread_create(&thread_local[i].thread, name,
                            thread_run, &thread_local[i], QEMU_THREAD_JOINABLE);
         g_free(name);
@@ -385,22 +364,25 @@ static void init_thread_data(Threads *threads, const char *th_name)
 Threads *threaded_workqueue_create(const char *name, unsigned int threads_nr,
                                int thread_request_nr, ThreadedWorkqueueOps *ops)
 {
+    size_t th_size;
     Threads *threads;
 
-    threads = qemu_memalign(SMP_CACHE_BYTES, sizeof(*threads));
-    memset(threads, 0, sizeof(*threads));
+    threads = g_new0(Threads, 1);
     threads->ops = ops;
 
     threads->threads_nr = threads_nr;
     threads->thread_request_nr = thread_request_nr;
 
-    threads->total_requests = thread_request_nr * threads_nr;
+    th_size = sizeof(ThreadLocal) * threads->threads_nr;
+    threads->per_thread_data = qemu_memalign(SMP_CACHE_BYTES, th_size);
+    memset(threads->per_thread_data, 0, th_size);
+
     if (init_requests(threads) < 0) {
-        qemu_vfree(threads);
+        qemu_vfree(threads->per_thread_data);
+        g_free(threads);
         return NULL;
     }
 
-    qemu_event_init(&threads->ev, false);
     init_thread_data(threads, name);
     return threads;
 }
@@ -408,9 +390,9 @@ Threads *threaded_workqueue_create(const char *name, unsigned int threads_nr,
 void threaded_workqueue_destroy(Threads *threads)
 {
     uninit_thread_data(threads);
-    uninit_requests(threads, threads->total_requests);
-    qemu_event_destroy(&threads->ev);
-    qemu_vfree(threads);
+    uninit_requests(threads);
+    qemu_vfree(threads->per_thread_data);
+    g_free(threads);
 }
 
 static void request_done(Threads *threads, ThreadRequest *request)
@@ -426,14 +408,12 @@ static void request_done(Threads *threads, ThreadRequest *request)
 void *threaded_workqueue_get_request(Threads *threads)
 {
     ThreadRequest *request;
-    int index;
 
-    index = find_free_request_index(threads);
-    if (index < 0) {
+    request = find_free_request(threads);
+    if (request == NULL) {
         return NULL;
     }
 
-    request = index_to_request(threads, index);
     request_done(threads, request);
     return request + 1;
 }
@@ -441,32 +421,34 @@ void *threaded_workqueue_get_request(Threads *threads)
 void threaded_workqueue_submit_request(Threads *threads, void *request)
 {
     ThreadRequest *req = request - sizeof(ThreadRequest);
-    int request_index = request_to_index(req);
-    int thread_index = request_index_to_thread(threads, request_index);
-    ThreadLocal *thread_local = &threads->per_thread_data[thread_index];
+    int request_index = request_to_index(threads, req);
+    ThreadLocal *thread_local = &threads->per_thread_data[req->th_idx];
 
     assert(!req->done);
 
-    mark_request_valid(threads, request_index);
+    mark_request_valid(&threads->per_thread_data[req->th_idx], request_index);
 
-    threads->current_thread_index = ++thread_index;
+    threads->current_thread_index = (req->th_idx + 1) % threads->threads_nr;
     qemu_event_set(&thread_local->ev);
 }
 
 void threaded_workqueue_wait_for_requests(Threads *threads)
 {
-    unsigned long *result_bitmap;
-    int index = 0;
+    int i, j;
 
-retry:
-    qemu_event_reset(&threads->ev);
-    result_bitmap = get_free_request_bitmap(threads);
-    for (; index < threads->total_requests; index++) {
-        if (test_bit(index, result_bitmap)) {
-            qemu_event_wait(&threads->ev);
-            goto retry;
-        };
+ retry:
+    for (i = 0; i < threads->threads_nr; i++) {
+        ThreadLocal *th = &threads->per_thread_data[i];
+        unsigned long *bm;
 
-        request_done(threads, index_to_request(threads, index));
+        qemu_event_reset(&th->completion_ev);
+        bm = get_free_request_bitmap(threads, i);
+        for (j = 0; j < threads->thread_request_nr; j++) {
+            if (test_bit(j, bm)) {
+                qemu_event_wait(&th->completion_ev);
+                goto retry;
+            }
+            request_done(threads, choose_req(threads, th, j));
+        }
     }
 }
