@@ -69,6 +69,7 @@ static bool tcg_out_ldst_ool_finalize(TCGContext *s)
 
         /* Remember the thunk for next time.  */
         g_hash_table_replace(s->ldst_ool_thunks, key, dest);
+        s->n_ool_thunks++;
 
         /* The new thunk must be in range.  */
         ok = patch_reloc(lb->label, lb->reloc, (intptr_t)dest, lb->addend);

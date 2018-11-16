@@ -709,6 +709,7 @@ struct TCGContext {
 #ifdef TCG_TARGET_NEED_LDST_OOL_LABELS
     QSIMPLEQ_HEAD(ldst_labels, TCGLabelQemuLdstOol) ldst_ool_labels;
     GHashTable *ldst_ool_thunks;
+    size_t n_ool_thunks;
 #endif
 #ifdef TCG_TARGET_NEED_POOL_LABELS
     struct TCGLabelPoolData *pool_labels;

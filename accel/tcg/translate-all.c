@@ -1678,6 +1678,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     target_ulong virt_page2;
     tcg_insn_unit *gen_code_buf;
     int gen_code_size, search_size;
+#ifdef TCG_TARGET_NEED_LDST_OOL_LABELS
+    size_t n_ool_thunks;
+#endif
 #ifdef CONFIG_PROFILER
     TCGProfile *prof = &tcg_ctx->prof;
     int64_t ti;
@@ -1742,6 +1745,10 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     atomic_set(&prof->tb_count, prof->tb_count + 1);
     atomic_set(&prof->interm_time, prof->interm_time + profile_getclock() - ti);
     ti = profile_getclock();
+#endif
+
+#ifdef TCG_TARGET_NEED_LDST_OOL_LABELS
+    n_ool_thunks = tcg_ctx->n_ool_thunks;
 #endif
 
     /* ??? Overflow could be handled better here.  In particular, we
@@ -1831,6 +1838,18 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     existing_tb = tb_link_page(tb, phys_pc, phys_page2);
     /* if the TB already exists, discard what we just translated */
     if (unlikely(existing_tb != tb)) {
+        bool discard = true;
+
+#ifdef TCG_TARGET_NEED_LDST_OOL_LABELS
+        /* only discard the TB if we didn't generate an OOL thunk */
+        discard = tcg_ctx->n_ool_thunks == n_ool_thunks;
+#endif
+        if (discard) {
+            uintptr_t orig_aligned = (uintptr_t)gen_code_buf;
+
+            orig_aligned -= ROUND_UP(sizeof(*tb), qemu_icache_linesize);
+            atomic_set(&tcg_ctx->code_gen_ptr, (void *)orig_aligned);
+        }
         return existing_tb;
     }
     tcg_tb_insert(tb);
