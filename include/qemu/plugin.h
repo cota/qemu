@@ -200,6 +200,8 @@ int64_t plugin_get_clock(void);
 void plugin_lockstep_cb(void);
 void plugin_chan_xmit(uint32_t cmd, const void *data, size_t size);
 
+void qemu_plugin_disable_mem_helpers(CPUState *cpu);
+
 #else /* !CONFIG_PLUGINS */
 
 static inline void qemu_plugin_vcpu_init_hook(CPUState *cpu)
@@ -243,6 +245,9 @@ void qemu_plugin_add_dyn_cb_arr(struct qemu_plugin_dyn_cb_arr *arr)
 { }
 
 static inline void plugin_lockstep_cb(void)
+{ }
+
+static inline void qemu_plugin_disable_mem_helpers(CPUState *cpu)
 { }
 
 int64_t plugin_get_clock(void);

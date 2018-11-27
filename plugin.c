@@ -1096,6 +1096,16 @@ void plugin_chan_xmit(uint32_t cmd, const void *data, size_t size)
     }
 }
 
+/*
+ * Call this function after longjmp'ing to the main loop. It's possible that the
+ * last instruction of a TB might have used helpers, and therefore the
+ * "disable" instruction will never execute because it ended up as dead code.
+ */
+void qemu_plugin_disable_mem_helpers(CPUState *cpu)
+{
+    cpu->plugin_mem_cbs = NULL;
+}
+
 static void __attribute__((__constructor__)) plugin_init(void)
 {
     int i;
