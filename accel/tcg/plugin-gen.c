@@ -222,9 +222,15 @@ qemu_plugin_gen_enable_mem_helpers(const struct qemu_plugin_dyn_cb_arr *orig)
 /* Called once we're done instrumenting an instruction that calls helpers */
 void qemu_plugin_gen_disable_mem_helpers(void)
 {
-    TCGv_ptr ptr = tcg_const_ptr(NULL);
+    TCGv_ptr ptr;
 
+    if (!tcg_ctx->plugin_insn || !tcg_ctx->plugin_insn->calls_helpers) {
+        return;
+    }
+
+    ptr = tcg_const_ptr(NULL);
     tcg_gen_st_ptr(ptr, cpu_env, -ENV_OFFSET + offsetof(CPUState,
                                                         plugin_mem_cbs));
     tcg_temp_free_ptr(ptr);
+    tcg_ctx->plugin_insn->calls_helpers = false;
 }
