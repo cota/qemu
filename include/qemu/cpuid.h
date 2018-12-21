@@ -19,6 +19,8 @@ enum qemu_cpuid_feature {
     QEMU_CPUID_LZCNT,
     QEMU_CPUID_SSE2,
     QEMU_CPUID_SSE4,
+    QEMU_CPUID_FMA3,
+    QEMU_CPUID_FMA4,
     QEMU_CPUID_NR_FEATURES,
 };
 

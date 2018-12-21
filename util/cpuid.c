@@ -16,6 +16,9 @@ static bool cpuid_inited;
 #endif
 
 /* Leaf 1, %ecx */
+#ifndef bit_FMA3
+#define bit_FMA3        (1 << 12)
+#endif
 #ifndef bit_SSE4_1
 #define bit_SSE4_1      (1 << 19)
 #endif
@@ -43,6 +46,9 @@ static bool cpuid_inited;
 /* Leaf 0x80000001, %ecx */
 #ifndef bit_LZCNT
 #define bit_LZCNT       (1 << 5)
+#endif
+#ifndef bit_FMA4
+#define bit_FMA4        (1 << 16)
 #endif
 
 static void qemu_cpuid_init(void)
@@ -80,6 +86,7 @@ static void qemu_cpuid_init(void)
             if ((xcrl & 6) == 6) {
                 cpuid_feat[QEMU_CPUID_AVX] = !!(c & bit_AVX);
                 cpuid_feat[QEMU_CPUID_AVX2] = !!(b7 & bit_AVX2);
+                cpuid_feat[QEMU_CPUID_FMA3] = !!(c & bit_FMA3);
             }
         }
     }
@@ -89,6 +96,7 @@ static void qemu_cpuid_init(void)
         __cpuid(0x80000001, a, b, c, d);
         /* LZCNT was introduced with AMD Barcelona and Intel Haswell CPUs.  */
         cpuid_feat[QEMU_CPUID_LZCNT] = !!(c & bit_LZCNT);
+        cpuid_feat[QEMU_CPUID_FMA4] = !!(c & bit_FMA4);
     }
 }
 
