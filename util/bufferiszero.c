@@ -235,28 +235,16 @@ static void init_accel(unsigned cache)
 
 static void __attribute__((constructor)) init_cpuid_cache(void)
 {
-    int max = __get_cpuid_max(0, NULL);
-    int a, b, c, d;
     unsigned cache = 0;
 
-    if (max >= 1) {
-        __cpuid(1, a, b, c, d);
-        if (d & bit_SSE2) {
-            cache |= CACHE_SSE2;
-        }
-        if (c & bit_SSE4_1) {
-            cache |= CACHE_SSE4;
-        }
-
-        /* We must check that AVX is not just available, but usable.  */
-        if ((c & bit_OSXSAVE) && (c & bit_AVX) && max >= 7) {
-            int bv;
-            __asm("xgetbv" : "=a"(bv), "=d"(d) : "c"(0));
-            __cpuid_count(7, 0, a, b, c, d);
-            if ((bv & 6) == 6 && (b & bit_AVX2)) {
-                cache |= CACHE_AVX2;
-            }
-        }
+    if (qemu_cpuid_supports(QEMU_CPUID_SSE2)) {
+        cache |= CACHE_SSE2;
+    }
+    if (qemu_cpuid_supports(QEMU_CPUID_SSE4)) {
+        cache |= CACHE_SSE4;
+    }
+    if (qemu_cpuid_supports(QEMU_CPUID_AVX2)) {
+        cache |= CACHE_AVX2;
     }
     cpuid_cache = cache;
     init_accel(cache);

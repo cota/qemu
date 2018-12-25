@@ -132,38 +132,17 @@ static const int tcg_target_call_oarg_regs[] = {
 # define TCG_REG_L1 TCG_REG_EDX
 #endif
 
-/* The host compiler should supply <cpuid.h> to enable runtime features
-   detection, as we're not going to go so far as our own inline assembly.
-   If not available, default values will be assumed.  */
-#if defined(CONFIG_CPUID_H)
 #include "qemu/cpuid.h"
-#endif
 
-/* For 64-bit, we always know that CMOV is available.  */
-#if TCG_TARGET_REG_BITS == 64
-# define have_cmov 1
-#elif defined(CONFIG_CPUID_H)
-static bool have_cmov;
-#else
-# define have_cmov 0
-#endif
-
-/* We need these symbols in tcg-target.h, and we can't properly conditionalize
-   it there.  Therefore we always define the variable.  */
 bool have_bmi1;
 bool have_popcnt;
 bool have_avx1;
 bool have_avx2;
 
-#ifdef CONFIG_CPUID_H
+static bool have_cmov;
 static bool have_movbe;
 static bool have_bmi2;
 static bool have_lzcnt;
-#else
-# define have_movbe 0
-# define have_bmi2 0
-# define have_lzcnt 0
-#endif
 
 static tcg_insn_unit *tb_ret_addr;
 
@@ -3444,53 +3423,17 @@ static void tcg_out_nop_fill(tcg_insn_unit *p, int count)
 
 static void tcg_target_init(TCGContext *s)
 {
-#ifdef CONFIG_CPUID_H
-    unsigned a, b, c, d, b7 = 0;
-    int max = __get_cpuid_max(0, 0);
-
-    if (max >= 7) {
-        /* BMI1 is available on AMD Piledriver and Intel Haswell CPUs.  */
-        __cpuid_count(7, 0, a, b7, c, d);
-        have_bmi1 = (b7 & bit_BMI) != 0;
-        have_bmi2 = (b7 & bit_BMI2) != 0;
-    }
-
-    if (max >= 1) {
-        __cpuid(1, a, b, c, d);
-#ifndef have_cmov
-        /* For 32-bit, 99% certainty that we're running on hardware that
-           supports cmov, but we still need to check.  In case cmov is not
-           available, we'll use a small forward branch.  */
-        have_cmov = (d & bit_CMOV) != 0;
-#endif
-
-        /* MOVBE is only available on Intel Atom and Haswell CPUs, so we
-           need to probe for it.  */
-        have_movbe = (c & bit_MOVBE) != 0;
-        have_popcnt = (c & bit_POPCNT) != 0;
-
-        /* There are a number of things we must check before we can be
-           sure of not hitting invalid opcode.  */
-        if (c & bit_OSXSAVE) {
-            unsigned xcrl, xcrh;
-            /* The xgetbv instruction is not available to older versions of
-             * the assembler, so we encode the instruction manually.
-             */
-            asm(".byte 0x0f, 0x01, 0xd0" : "=a" (xcrl), "=d" (xcrh) : "c" (0));
-            if ((xcrl & 6) == 6) {
-                have_avx1 = (c & bit_AVX) != 0;
-                have_avx2 = (b7 & bit_AVX2) != 0;
-            }
-        }
-    }
-
-    max = __get_cpuid_max(0x8000000, 0);
-    if (max >= 1) {
-        __cpuid(0x80000001, a, b, c, d);
-        /* LZCNT was introduced with AMD Barcelona and Intel Haswell CPUs.  */
-        have_lzcnt = (c & bit_LZCNT) != 0;
-    }
-#endif /* CONFIG_CPUID_H */
+    /* For 32-bit, 99% certainty that we're running on hardware that
+       supports cmov, but we still need to check.  In case cmov is not
+       available, we'll use a small forward branch.  */
+    have_cmov   = qemu_cpuid_supports(QEMU_CPUID_CMOV);
+    have_bmi1   = qemu_cpuid_supports(QEMU_CPUID_BMI);
+    have_bmi2   = qemu_cpuid_supports(QEMU_CPUID_BMI2);
+    have_movbe  = qemu_cpuid_supports(QEMU_CPUID_MOVBE);
+    have_popcnt = qemu_cpuid_supports(QEMU_CPUID_POPCNT);
+    have_avx1   = qemu_cpuid_supports(QEMU_CPUID_AVX);
+    have_avx2   = qemu_cpuid_supports(QEMU_CPUID_AVX2);
+    have_lzcnt  = qemu_cpuid_supports(QEMU_CPUID_LZCNT);
 
     tcg_target_available_regs[TCG_TYPE_I32] = ALL_GENERAL_REGS;
     if (TCG_TARGET_REG_BITS == 64) {
