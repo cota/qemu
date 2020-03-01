@@ -130,7 +130,7 @@ int aio_bh_poll(AioContext *ctx)
         bhp = &ctx->first_bh;
         while (*bhp) {
             bh = *bhp;
-            if (bh->deleted && !bh->scheduled) {
+            if (bh->deleted && !atomic_read(&bh->scheduled)) {
                 *bhp = bh->next;
                 g_free(bh);
             } else {
@@ -181,7 +181,7 @@ void qemu_bh_cancel(QEMUBH *bh)
  */
 void qemu_bh_delete(QEMUBH *bh)
 {
-    bh->scheduled = 0;
+    atomic_set(&bh->scheduled, 0);
     bh->deleted = 1;
 }
 
@@ -194,7 +194,7 @@ aio_compute_timeout(AioContext *ctx)
 
     for (bh = atomic_rcu_read(&ctx->first_bh); bh;
          bh = atomic_rcu_read(&bh->next)) {
-        if (bh->scheduled) {
+        if (atomic_read(&bh->scheduled)) {
             if (bh->idle) {
                 /* idle bottom halves will be polled at least
                  * every 10ms */
@@ -242,7 +242,7 @@ aio_ctx_check(GSource *source)
     aio_notify_accept(ctx);
 
     for (bh = ctx->first_bh; bh; bh = bh->next) {
-        if (bh->scheduled) {
+        if (atomic_read(&bh->scheduled)) {
             return true;
         }
     }
@@ -377,7 +377,7 @@ void aio_notify(AioContext *ctx)
      * with atomic_or in aio_ctx_prepare or atomic_add in aio_poll.
      */
     smp_mb();
-    if (ctx->notify_me) {
+    if (atomic_read(&ctx->notify_me)) {
         event_notifier_set(&ctx->notifier);
         atomic_mb_set(&ctx->notified, true);
     }
