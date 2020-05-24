@@ -87,9 +87,6 @@ void cpu_list_remove_locked(CPUState *cpu) {
         /* there is nothing to undo since cpu_exec_init() hasn't been called */
         return;
     }
-
-    assert(!(cpu_index_auto_assigned && cpu != QTAILQ_LAST(&cpus)));
-
     QTAILQ_REMOVE_RCU(&cpus, cpu, node);
     cpu->cpu_index = UNASSIGNED_CPU_INDEX;
 }
