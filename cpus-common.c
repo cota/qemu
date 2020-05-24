@@ -82,9 +82,7 @@ void cpu_list_add(CPUState *cpu)
     QTAILQ_INSERT_TAIL_RCU(&cpus, cpu, node);
 }
 
-void cpu_list_remove(CPUState *cpu)
-{
-    QEMU_LOCK_GUARD(&qemu_cpu_list_lock);
+void cpu_list_remove_locked(CPUState *cpu) {
     if (!QTAILQ_IN_USE(cpu, node)) {
         /* there is nothing to undo since cpu_exec_init() hasn't been called */
         return;
@@ -94,6 +92,12 @@ void cpu_list_remove(CPUState *cpu)
 
     QTAILQ_REMOVE_RCU(&cpus, cpu, node);
     cpu->cpu_index = UNASSIGNED_CPU_INDEX;
+}
+
+void cpu_list_remove(CPUState *cpu)
+{
+    QEMU_LOCK_GUARD(&qemu_cpu_list_lock);
+    cpu_list_remove_locked(cpu);
 }
 
 struct qemu_work_item {

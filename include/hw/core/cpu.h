@@ -647,6 +647,14 @@ void cpu_list_add(CPUState *cpu);
 void cpu_list_remove(CPUState *cpu);
 
 /**
+ * cpu_list_remove_locked:
+ * @cpu: The CPU to be removed from the list of CPUs.
+ *
+ * The caller must hold qemu_cpu_list_lock.
+ */
+void cpu_list_remove_locked(CPUState *cpu);
+
+/**
  * cpu_reset:
  * @cpu: The CPU whose state is to be reset.
  */
