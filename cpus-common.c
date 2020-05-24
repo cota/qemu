@@ -23,6 +23,7 @@
 #include "hw/core/cpu.h"
 #include "sysemu/cpus.h"
 #include "qemu/lockable.h"
+#include "trace-root.h"
 
 static QemuMutex qemu_cpu_list_lock;
 static QemuCond exclusive_cond;
@@ -87,6 +88,14 @@ void cpu_list_remove_locked(CPUState *cpu) {
         /* there is nothing to undo since cpu_exec_init() hasn't been called */
         return;
     }
+    /*
+     * User mode does not call cpu_common_unrealizefn after exit/fork. However,
+     * it calls this function to clean up the CPU list, which makes this an
+     * appropriate place from which to call the vcpu_exit callbacks.
+     */
+    trace_fini_vcpu(cpu);
+    qemu_plugin_vcpu_exit_hook(cpu);
+
     QTAILQ_REMOVE_RCU(&cpus, cpu, node);
     cpu->cpu_index = UNASSIGNED_CPU_INDEX;
 }
