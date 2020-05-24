@@ -57,17 +57,29 @@ void cpu_list_unlock(void)
     qemu_mutex_unlock(&qemu_cpu_list_lock);
 }
 
+/* Protected by qemu_cpu_list_lock */
 static bool cpu_index_auto_assigned;
+static int cpu_index_bits;
+static unsigned long *cpu_index_bitmap;
 
 static int cpu_get_free_index(void)
 {
-    CPUState *some_cpu;
-    int cpu_index = 0;
+    int cpu_index;
 
     cpu_index_auto_assigned = true;
-    CPU_FOREACH(some_cpu) {
-        cpu_index++;
+    if (cpu_index_bitmap == NULL) {
+        cpu_index_bits = 8;
+        cpu_index_bitmap = bitmap_new(cpu_index_bits);
     }
+    cpu_index = find_first_zero_bit(cpu_index_bitmap, cpu_index_bits);
+    if (unlikely(cpu_index >= cpu_index_bits)) {
+        cpu_index_bitmap = bitmap_zero_extend(cpu_index_bitmap, cpu_index_bits,
+                                              cpu_index_bits * 2);
+        cpu_index_bits *= 2;
+    }
+    cpu_index = find_first_zero_bit(cpu_index_bitmap, cpu_index_bits);
+    g_assert_cmpint(cpu_index, <, cpu_index_bits);
+    set_bit(cpu_index, cpu_index_bitmap);
     return cpu_index;
 }
 
@@ -97,6 +109,7 @@ void cpu_list_remove_locked(CPUState *cpu) {
     qemu_plugin_vcpu_exit_hook(cpu);
 
     QTAILQ_REMOVE_RCU(&cpus, cpu, node);
+    clear_bit(cpu->cpu_index, cpu_index_bitmap);
     cpu->cpu_index = UNASSIGNED_CPU_INDEX;
 }
 

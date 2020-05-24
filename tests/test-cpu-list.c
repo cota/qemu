@@ -30,7 +30,7 @@ static void test2(void)
     cpu_list_remove(&cpus[0]);
     g_assert_cmpint(cpus[0].cpu_index, ==, UNASSIGNED_CPU_INDEX);
     cpu_list_add(&cpus[0]);
-    g_assert_cmpint(cpus[0].cpu_index, ==, 1); /* wrong, already exists */
+    g_assert_cmpint(cpus[0].cpu_index, ==, 0);
 
     /* remove all CPUs at the end of this test because the bitmap is global */
     for (i = 0; i < ARRAY_SIZE(cpus); i++) {
@@ -58,15 +58,15 @@ static void test3(void)
     cpu_list_remove(&cpus[1]);
     g_assert_cmpint(cpus[1].cpu_index, ==, UNASSIGNED_CPU_INDEX);
     cpu_list_add(&cpus[1]);
-    g_assert_cmpint(cpus[1].cpu_index, ==, 2); /* wrong, already exists */
+    g_assert_cmpint(cpus[1].cpu_index, ==, 1);
 
     /* remove and re-add the first and last CPUs */
     cpu_list_remove(&cpus[2]);
     cpu_list_remove(&cpus[0]);
     cpu_list_add(&cpus[2]);
-    g_assert_cmpint(cpus[2].cpu_index, ==, 1);
+    g_assert_cmpint(cpus[2].cpu_index, ==, 0);
     cpu_list_add(&cpus[0]);
-    g_assert_cmpint(cpus[0].cpu_index, ==, 2); /* wrong, already exists */
+    g_assert_cmpint(cpus[0].cpu_index, ==, 2);
 
     /* remove all CPUs at the end of this test because the bitmap is global */
     for (i = 0; i < ARRAY_SIZE(cpus); i++) {
