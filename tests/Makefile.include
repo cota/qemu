@@ -91,6 +91,7 @@ ifeq ($(CONFIG_SOFTMMU),y)
 check-unit-y += tests/test-xbzrle$(EXESUF)
 check-unit-$(CONFIG_POSIX) += tests/test-vmstate$(EXESUF)
 endif
+check-unit-y += tests/test-cpu-list$(EXESUF)
 check-unit-y += tests/test-cutils$(EXESUF)
 check-unit-y += tests/test-shift128$(EXESUF)
 check-unit-y += tests/test-mul64$(EXESUF)
@@ -413,6 +414,7 @@ tests/test-hbitmap$(EXESUF): tests/test-hbitmap.o $(test-util-obj-y) $(test-cryp
 tests/test-bitmap$(EXESUF): tests/test-bitmap.o $(test-util-obj-y)
 tests/test-x86-cpuid$(EXESUF): tests/test-x86-cpuid.o
 tests/test-xbzrle$(EXESUF): tests/test-xbzrle.o migration/xbzrle.o migration/page_cache.o $(test-util-obj-y)
+tests/test-cpu-list$(EXESUF): tests/test-cpu-list.o cpus-common.o tests/cpus-common-shim.o $(test-util-obj-y)
 tests/test-cutils$(EXESUF): tests/test-cutils.o util/cutils.o $(test-util-obj-y)
 tests/test-int128$(EXESUF): tests/test-int128.o
 tests/rcutorture$(EXESUF): tests/rcutorture.o $(test-util-obj-y)
